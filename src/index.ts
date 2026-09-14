@@ -80,3 +80,20 @@ export {
   type ContractCall,
   type SubmissionResult,
 } from "./tx.ts";
+
+// Framework adapters. Both are written structurally against their host's hook,
+// so neither framework is a dependency of this package.
+export {
+  createLangChainGuardMiddleware,
+  type LangChainGuardOptions,
+  type LangChainToolCallRequest,
+  type LangChainToolMessage,
+} from "./adapters/langchain.ts";
+
+export {
+  createGuardValidator,
+  guardAction,
+  type ElizaActionLike,
+  type ElizaGuardOptions,
+  type ElizaValidator,
+} from "./adapters/elizaos.ts";

@@ -1,0 +1,231 @@
+{
+  "network": "testnet",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "deployedAt": "2026-09-14T13:18:00.000Z",
+  "lastVerifiedAt": "2026-09-14T13:27:40.923Z",
+  "phase1HistoricalInstance": {
+    "note": "Phase 1 evidence. Deliberately untouched by Phase 2: it is the dead-man-switch proof and is currently frozen by its own switch (heartbeat_expired).",
+    "guard": "CAYJZT4XH5SWDXNR7MZJCCUBIDAT2KZDDUTZ7OZQEMKCPJGD4P3X4CU7",
+    "wasmHash": "f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63",
+    "artifactIdentityMatch": true,
+    "liveStatus": {
+      "admin_frozen": false,
+      "has_policy": true,
+      "heartbeat_expired": true,
+      "last_heartbeat": "1788855212",
+      "now": "1789392457"
+    }
+  },
+  "phase2EnforcementInstance": {
+    "note": "Live Phase 2 instance: a fresh instance of the identical Phase 1 artifact (byte-for-byte, hash-verified below), with keys held by this repo. Enforcement integration tests run against this instance.",
+    "guard": "CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44",
+    "wasmHashLedger": "f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63",
+    "wasmHashFetched": "f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63",
+    "wasmBytes": 39673,
+    "artifactIdentityMatch": true,
+    "policySha256": "95f56fb8194f13f634ca1d9c49a8b2cb8500a2a7a5c39c62892f4b2c3085f04a",
+    "token": "CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB",
+    "tokenIssuer": "GCE5SDY44O23HRRN4XRTOZ2DJRAKN3WKYMUGIMYCS7RB7OG27MKN5ZPO",
+    "addresses": {
+      "admin": "GDCPT4Z3MBH7X6IX6A6BHIENUL7DRZ44O2SL2V72QJVOEJHJROP3PQDG",
+      "agent": "GBJ3BE7AFANC3D2CO23X7UQ6GOALGMU7BEEXVTR5TZQM6DZPSA46ETDE",
+      "agentRawEd25519Pubkey": "53b093e0281a2d8f4276b77fd21e3380b3329f09097ace3d9e60cf0f2f9039e2",
+      "recipient": "GAOBCRXTCO4ZCBNHALJUMJJ5JDXNOUZ7U6VZJX4UBTXAHQEO66IPU6PH",
+      "outsider": "GDZOKF3HGA6XSKIEEPJC5ANON3IJ5OGZMCX7GEGJLZN7JFRKOO4N2HXM"
+    },
+    "transactions": {
+      "tokenCreate": {
+        "hash": "7fe079ea385fce766a7b77e85acd045c07c107eb6eabe9017e78e724e3011aa2",
+        "ledger": 4673643,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673643
+        }
+      },
+      "guardDeploy": {
+        "hash": "de1927136323f817b060765eb72a7c092d1e54d1d08e63b2310801f269aadcc8",
+        "ledger": 4673644,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673644
+        }
+      },
+      "initialize": {
+        "hash": "e9f606dc641b0bf04a58bb1ca1e7f4fed2cf5f19e9c366d1c788b617b7aa3194",
+        "ledger": 4673645,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673645
+        }
+      },
+      "trustlineRecipient": {
+        "hash": "e52cf96533fa47a1e4eeb68e781bb78fafc51834d8a5fb0454d2550bfd5522dc",
+        "ledger": 4673656,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673656
+        }
+      },
+      "trustlineOutsider": {
+        "hash": "a77db8139eaa19a40addc2e120bb028e6dd7e3e87c10a8941717b1da94784b81",
+        "ledger": 4673657,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673657
+        }
+      },
+      "mint": {
+        "hash": "3307ca1a85ab7b66e9dbe3ed310216bedb0c924a8e8283811059ad24789eb4bf",
+        "ledger": 4673658,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673658
+        }
+      },
+      "setPolicy": {
+        "hash": "e5eeb56cd92e04ef16076a2fbc48cf51811fbb44c8f91df8852b6c5f1e2242a3",
+        "ledger": 4673663,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673663
+        }
+      },
+      "setPolicyRedundant": {
+        "hash": "0ce89ae9086733ee1f6d3ebe70afa75b71a7fb5ad409857ec1e18134a51c4a64",
+        "ledger": 4673667,
+        "status": "SUCCESS",
+        "recordedAt": "2026-09-14T13:25:00.000Z",
+        "lastVerified": {
+          "at": "2026-09-14T13:27:39.888Z",
+          "status": "SUCCESS",
+          "ledger": 4673667
+        }
+      }
+    },
+    "allRecordedTransactionsVerified": true,
+    "status": {
+      "admin_frozen": false,
+      "has_policy": true,
+      "heartbeat_expired": false,
+      "last_heartbeat": "1789391922",
+      "now": "1789392457"
+    },
+    "policy": {
+      "active_from": "0",
+      "active_until": "0",
+      "allow_any_recipient": false,
+      "assets": [
+        "CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB"
+      ],
+      "dms_grace_secs": "0",
+      "paused": false,
+      "per_tx_cap": "1000",
+      "protocols": [],
+      "recipients": [
+        "GAOBCRXTCO4ZCBNHALJUMJJ5JDXNOUZ7U6VZJX4UBTXAHQEO66IPU6PH"
+      ],
+      "window_cap": "150",
+      "window_secs": "60"
+    },
+    "guardTokenBalance": "100000"
+  },
+  "runs": [
+    {
+      "at": "2026-09-14T13:27:23.970Z",
+      "actions": [
+        "[0] Phase 1 artifact identity (must match before anything is deployed)",
+        "    phase 1 guard  CAYJZT4XH5SWDXNR7MZJCCUBIDAT2KZDDUTZ7OZQEMKCPJGD4P3X4CU7\n    ledger hash    f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63\n    sha256(bytes)  f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63 (39673 bytes)\n    identity match true",
+        "[1] keys: reused from .env.phase2",
+        "    admin     GDCPT4Z3MBH7X6IX6A6BHIENUL7DRZ44O2SL2V72QJVOEJHJROP3PQDG",
+        "    agent     GBJ3BE7AFANC3D2CO23X7UQ6GOALGMU7BEEXVTR5TZQM6DZPSA46ETDE",
+        "    issuer    GCE5SDY44O23HRRN4XRTOZ2DJRAKN3WKYMUGIMYCS7RB7OG27MKN5ZPO",
+        "    recipient GAOBCRXTCO4ZCBNHALJUMJJ5JDXNOUZ7U6VZJX4UBTXAHQEO66IPU6PH",
+        "    outsider  GDZOKF3HGA6XSKIEEPJC5ANON3IJ5OGZMCX7GEGJLZN7JFRKOO4N2HXM",
+        "    agent raw ed25519 pubkey 53b093e0281a2d8f4276b77fd21e3380b3329f09097ace3d9e60cf0f2f9039e2",
+        "[2] SAC test token already deployed\n    token CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB (decimals 7)",
+        "[3] guard instance already deployed at CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44",
+        "    guard CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44\n    ledger hash   f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63\n    sha256(bytes) f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63 (39673 bytes)\n    SAME ARTIFACT AS PHASE 1: true",
+        "[4] initialize already recorded on the instance",
+        "[5] recipient + outsider trustlines",
+        "    recipient trustline already present (balance 0)",
+        "    outsider  trustline already present (balance 0)",
+        "[6] guard already holds 100000 of the test token",
+        "[7] policy already matches the desired enforcement policy",
+        "[8] verifying final on-chain state",
+        "[9] recorded transactions re-verified: SUCCESS@4673643 SUCCESS@4673644 SUCCESS@4673645 SUCCESS@4673656 SUCCESS@4673657 SUCCESS@4673658 SUCCESS@4673663 SUCCESS@4673667"
+      ]
+    },
+    {
+      "at": "2026-09-14T13:27:34.732Z",
+      "actions": [
+        "[0] Phase 1 artifact identity (must match before anything is deployed)",
+        "    phase 1 guard  CAYJZT4XH5SWDXNR7MZJCCUBIDAT2KZDDUTZ7OZQEMKCPJGD4P3X4CU7\n    ledger hash    f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63\n    sha256(bytes)  f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63 (39673 bytes)\n    identity match true",
+        "[1] keys: reused from .env.phase2",
+        "    admin     GDCPT4Z3MBH7X6IX6A6BHIENUL7DRZ44O2SL2V72QJVOEJHJROP3PQDG",
+        "    agent     GBJ3BE7AFANC3D2CO23X7UQ6GOALGMU7BEEXVTR5TZQM6DZPSA46ETDE",
+        "    issuer    GCE5SDY44O23HRRN4XRTOZ2DJRAKN3WKYMUGIMYCS7RB7OG27MKN5ZPO",
+        "    recipient GAOBCRXTCO4ZCBNHALJUMJJ5JDXNOUZ7U6VZJX4UBTXAHQEO66IPU6PH",
+        "    outsider  GDZOKF3HGA6XSKIEEPJC5ANON3IJ5OGZMCX7GEGJLZN7JFRKOO4N2HXM",
+        "    agent raw ed25519 pubkey 53b093e0281a2d8f4276b77fd21e3380b3329f09097ace3d9e60cf0f2f9039e2",
+        "[2] SAC test token already deployed\n    token CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB (decimals 7)",
+        "[3] guard instance already deployed at CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44",
+        "    guard CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44\n    ledger hash   f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63\n    sha256(bytes) f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63 (39673 bytes)\n    SAME ARTIFACT AS PHASE 1: true",
+        "[4] initialize already recorded on the instance",
+        "[5] recipient + outsider trustlines",
+        "    recipient trustline already present (balance 0)",
+        "    outsider  trustline already present (balance 0)",
+        "[6] guard already holds 100000 of the test token",
+        "[7] policy already matches the desired enforcement policy",
+        "[8] verifying final on-chain state",
+        "[9] recorded transactions re-verified: SUCCESS@4673643 SUCCESS@4673644 SUCCESS@4673645 SUCCESS@4673656 SUCCESS@4673657 SUCCESS@4673658 SUCCESS@4673663 SUCCESS@4673667"
+      ]
+    },
+    {
+      "at": "2026-09-14T13:27:40.923Z",
+      "actions": [
+        "[0] Phase 1 artifact identity (must match before anything is deployed)",
+        "    phase 1 guard  CAYJZT4XH5SWDXNR7MZJCCUBIDAT2KZDDUTZ7OZQEMKCPJGD4P3X4CU7\n    ledger hash    f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63\n    sha256(bytes)  f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63 (39673 bytes)\n    identity match true",
+        "[1] keys: reused from .env.phase2",
+        "    admin     GDCPT4Z3MBH7X6IX6A6BHIENUL7DRZ44O2SL2V72QJVOEJHJROP3PQDG",
+        "    agent     GBJ3BE7AFANC3D2CO23X7UQ6GOALGMU7BEEXVTR5TZQM6DZPSA46ETDE",
+        "    issuer    GCE5SDY44O23HRRN4XRTOZ2DJRAKN3WKYMUGIMYCS7RB7OG27MKN5ZPO",
+        "    recipient GAOBCRXTCO4ZCBNHALJUMJJ5JDXNOUZ7U6VZJX4UBTXAHQEO66IPU6PH",
+        "    outsider  GDZOKF3HGA6XSKIEEPJC5ANON3IJ5OGZMCX7GEGJLZN7JFRKOO4N2HXM",
+        "    agent raw ed25519 pubkey 53b093e0281a2d8f4276b77fd21e3380b3329f09097ace3d9e60cf0f2f9039e2",
+        "[2] SAC test token already deployed\n    token CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB (decimals 7)",
+        "[3] guard instance already deployed at CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44",
+        "    guard CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44\n    ledger hash   f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63\n    sha256(bytes) f47919f92e78fdd034836aa61955fc338dd56a218c448c37df1867a8c3da0f63 (39673 bytes)\n    SAME ARTIFACT AS PHASE 1: true",
+        "[4] initialize already recorded on the instance",
+        "[5] recipient + outsider trustlines",
+        "    recipient trustline already present (balance 0)",
+        "    outsider  trustline already present (balance 0)",
+        "[6] guard already holds 100000 of the test token",
+        "[7] policy already matches the desired enforcement policy",
+        "[8] verifying final on-chain state",
+        "[9] recorded transactions re-verified: SUCCESS@4673643 SUCCESS@4673644 SUCCESS@4673645 SUCCESS@4673656 SUCCESS@4673657 SUCCESS@4673658 SUCCESS@4673663 SUCCESS@4673667"
+      ]
+    }
+  ]
+}

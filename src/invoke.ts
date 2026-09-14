@@ -194,8 +194,82 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
   return second;
 }
 
+/**
+ * The outcome of steps 1–3: the guard has been asked, and answered.
+ *
+ * `admissible` means the enforced simulation ran the real `__check_auth` against
+ * live ledger state and it passed. It is separated from submission so the
+ * pre-flight interceptor can ask the same question without broadcasting
+ * anything — one implementation of the enforcement question, two callers.
+ */
+export type EnforcementOutcome =
+  | {
+      kind: "admissible";
+      /** The successful enforced simulation, carrying real resource pricing. */
+      simulation: rpc.Api.SimulateTransactionSuccessResponse;
+      /** The operation with signed authorizations attached, ready to assemble. */
+      operation: xdr.Operation;
+      /** Base sequence number for building the submitting envelope. */
+      nextSeq: string;
+    }
+  | {
+      kind: "blocked";
+      reason: string;
+      detail: string;
+      diagnosticEvents: unknown[];
+    }
+  | { kind: "error"; detail: string };
+
 /** One attempt: simulate → sign → enforce → submit. No retry logic lives here. */
 async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
+  const { server, call } = params;
+  const enforced = await enforceCall(params);
+  if (enforced.kind !== "admissible") return enforced;
+
+  if (params.dryRun) {
+    return {
+      kind: "error",
+      detail: "dry run: enforced simulation passed; submission skipped as requested",
+    };
+  }
+
+  // ── Step 4: assemble real resources, sign the envelope, broadcast ─────
+  const assembled = assembleFromSimulation({
+    simulation: enforced.simulation,
+    // A fresh `Account` per build: `TransactionBuilder` advances the sequence of
+    // the instance it is handed, so sharing one across builds silently produces
+    // `tx_bad_seq`.
+    source: new Account(params.source.publicKey(), enforced.nextSeq),
+    operation: enforced.operation,
+    networkPassphrase: params.networkPassphrase,
+    guard: params.guardAuth?.guard ?? null,
+  });
+
+  const submission = await submitAndPoll(server, assembled.transaction, [params.source]);
+  if (submission.failure) {
+    // A post-broadcast rejection is a hard error, not a policy block: the
+    // enforced simulation already passed, so anything here is a defect in
+    // construction (sequence, fee, footprint) or a contract trap — never a
+    // guardrail doing its job.
+    return {
+      kind: "error",
+      detail: `tx ${submission.hash} ${describeSubmissionFailure(submission.failure)}`,
+      ...(isStaleLedgerResourceFailure(submission.failure)
+        ? { retryable: "stale_ledger_resource_limit" as const }
+        : {}),
+    };
+  }
+  return { kind: "allowed", submission };
+}
+
+/**
+ * Steps 1–3 of the pipeline, with no submission: discover what the call needs,
+ * sign it, then run the *enforced* simulation that actually exercises the
+ * guard's `__check_auth` against live ledger state.
+ *
+ * Nothing here mutates the ledger, which is what makes a refusal free.
+ */
+export async function enforceCall(params: InvokeParams): Promise<EnforcementOutcome> {
   const { server, source, call, networkPassphrase } = params;
   const operation = Operation.invokeContractFunction({
     contract: call.contract,
@@ -336,6 +410,10 @@ async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
     console.log(`[debug] enforced simulation:\n${describeSimulationResources(enforced, params.guardAuth?.guard ?? null)}`);
   }
   if (rpc.Api.isSimulationError(enforced)) {
+    // NOTE: a simulation failure here is not automatically a block — see the
+    // discriminator below. Returning `error` rather than `blocked` in that case
+    // is deliberate: an adapter must be able to tell "the guard refused this"
+    // from "we could not determine".
     const error = enforced as rpc.Api.SimulateTransactionErrorResponse;
     const events = diagnosticEventsOf(error);
     const reason = reasonFromDiagnosticEvents(events);
@@ -360,35 +438,10 @@ async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
     };
   }
 
-  if (params.dryRun) {
-    return {
-      kind: "error",
-      detail: "dry run: enforced simulation passed; submission skipped as requested",
-    };
-  }
-
-  // ── Step 4: assemble real resources, sign the envelope, broadcast ─────
-  const assembled = assembleFromSimulation({
+  return {
+    kind: "admissible",
     simulation: enforced as rpc.Api.SimulateTransactionSuccessResponse,
-    source: freshAccount(),
     operation: signedOperation,
-    networkPassphrase,
-    guard: params.guardAuth?.guard ?? null,
-  });
-
-  const submission = await submitAndPoll(server, assembled.transaction, [source]);
-  if (submission.failure) {
-    // A post-broadcast rejection is a hard error, not a policy block: the
-    // enforced simulation already passed, so anything here is a defect in
-    // construction (sequence, fee, footprint) or a contract trap — never a
-    // guardrail doing its job.
-    return {
-      kind: "error",
-      detail: `tx ${submission.hash} ${describeSubmissionFailure(submission.failure)}`,
-      ...(isStaleLedgerResourceFailure(submission.failure)
-        ? { retryable: "stale_ledger_resource_limit" as const }
-        : {}),
-    };
-  }
-  return { kind: "allowed", submission };
+    nextSeq,
+  };
 }

@@ -1,0 +1,47 @@
+{
+  "name": "stellar-agent-guard-sdk",
+  "version": "0.1.0",
+  "description": "Integration bridge between AI agent frameworks and stellar-agent-guard smart accounts: pre-flight policy interception, agent-auth transaction signing, cost pre-checks, and on-chain event telemetry. Full recipient/amount enforcement applies to SAC token transfers; other Soroban calls get window and pause state only.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "stellar",
+    "soroban",
+    "ai-agents",
+    "guardrails",
+    "spend-limits",
+    "custom-account"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/unit/*.test.ts",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.ts",
+    "inspect": "node scripts/inspect-deployment.ts",
+    "deploy:phase2": "node scripts/deploy-phase2-instance.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^17.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "typescript": "^5.9.2"
+  }
+}

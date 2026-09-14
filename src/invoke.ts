@@ -16,6 +16,7 @@
  * which is the property the pre-flight interceptor is built to expose.
  */
 import { Account, Address, Keypair, Operation, rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
+import { GUARD_AUTH_RESULTS, decodeAuthDecision } from "./events.ts";
 import {
   SIG_EXPIRATION_LEDGERS,
   assembleFromSimulation,
@@ -23,6 +24,7 @@ import {
   buildInitialEnvelope,
   describeSubmissionFailure,
   signAccountAuthEntry,
+  summarizeDiagnosticEvents,
   submitAndPoll,
   type ContractCall,
   type SubmissionResult,
@@ -88,18 +90,22 @@ function topicSymbols(raw: unknown): string[] {
 }
 
 /**
- * Extract the contract's own `auth_checked` reason from a simulation failure.
+ * Extract the contract's own block reason from a simulation failure.
  *
  * The RPC error string is not the contract's reason vocabulary, but the
  * diagnostic events bundled with the failure are: the guard publishes
- * `topics = [auth_checked, blocked, <reason>]` on every decision, including the
- * decisions taken inside an enforced simulation.
+ * `topics = [event_auth_checked, blocked, <reason>]` on every decision,
+ * including decisions taken inside an enforced simulation. Note the `event_`
+ * prefix — see `events.ts` for why the live topic differs from the docs' name.
+ *
+ * A *blocked* decision is only ever observed here, as a diagnostic: the guard
+ * returns `Err`, which rolls the event back, so it never reaches a ledger.
  */
 export function reasonFromDiagnosticEvents(events: unknown[]): string | null {
   for (const event of events) {
-    const symbols = topicSymbols(event);
-    if (symbols[0] === "auth_checked" && symbols[1] === "blocked" && symbols[2]) {
-      return symbols[2];
+    const decision = decodeAuthDecision(topicSymbols(event), "diagnostic");
+    if (decision?.result === GUARD_AUTH_RESULTS.blocked && decision.reason) {
+      return decision.reason;
     }
   }
   return null;
@@ -110,6 +116,25 @@ export function reasonFromDiagnosticEvents(events: unknown[]): string | null {
  * Both the top-level `events` field and the nested error payload are checked:
  * which one carries them varies by failure kind.
  */
+/**
+ * Payload of an address-bound credential, for either arm.
+ *
+ * The two arms name their payload differently (`address` for legacy, `addressV2`
+ * for CAP-71's address-bound form), which mirrors the SDK's own internal
+ * `getAddressCredentials` switch.
+ */
+function addressCredentialsOf(
+  credentials: xdr.SorobanCredentials,
+): xdr.SorobanAddressCredentials | null {
+  if (credentials.type === "sorobanCredentialsAddress") {
+    return credentials.address;
+  }
+  if (credentials.type === "sorobanCredentialsAddressV2") {
+    return credentials.addressV2;
+  }
+  return null;
+}
+
 function diagnosticEventsOf(response: unknown): unknown[] {
   const candidate = response as {
     events?: unknown;
@@ -154,8 +179,19 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
   });
   const first = await server.simulateTransaction(probe);
   if (rpc.Api.isSimulationError(first)) {
+    // The discovery simulation runs in recording mode, so it can fail for
+    // reasons that have nothing to do with policy (a contract trap, a missing
+    // trustline). Report it as an error with the host's own diagnostics rather
+    // than pretending the guard made a decision.
     const error = first as rpc.Api.SimulateTransactionErrorResponse;
-    return { kind: "error", detail: error.error ?? "initial simulation failed" };
+    const events = diagnosticEventsOf(error);
+    return {
+      kind: "error",
+      detail: [
+        typeof error.error === "string" ? error.error : JSON.stringify(error.error),
+        ...summarizeDiagnosticEvents(events),
+      ].join("\n  "),
+    };
   }
   const success = first as rpc.Api.SimulateTransactionSuccessResponse;
   const requiredAuth: xdr.SorobanAuthorizationEntry[] = success.result?.auth ?? [];
@@ -174,16 +210,28 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
       signedAuth.push(entry);
       continue;
     }
-    if (creds.type !== "sorobanCredentialsAddress") {
+    if (
+      creds.type !== "sorobanCredentialsAddress" &&
+      creds.type !== "sorobanCredentialsAddressV2"
+    ) {
+      // ADDRESS_WITH_DELEGATES (CAP-71 delegation) is out of v1 scope; the
+      // contract's SPEC records the same boundary.
       return {
         kind: "error",
         detail: `unsupported credential type in required authorization: ${creds.type}`,
       };
     }
+    const addressCredentials = addressCredentialsOf(creds);
+    if (!addressCredentials) {
+      return {
+        kind: "error",
+        detail: `credential kind has no address payload: ${creds.type}`,
+      };
+    }
     // Works for both account (G…) and contract (C…) authorizers; the guard's
     // address is a contract, which is exactly why the agent key — not the
     // transaction source — has to produce this signature.
-    const address = Address.fromScAddress(creds.address.address).toString();
+    const address = Address.fromScAddress(addressCredentials.address).toString();
 
     if (params.guardAuth && address === params.guardAuth.guard) {
       // The smart account authorizes: sign with the registered agent key over
@@ -199,6 +247,10 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
           nonce: BigInt(nextSeq),
           signatureExpirationLedger: expiration,
           networkPassphrase,
+          // Answer in the same credential kind the host asked for: the signed
+          // preimage differs between legacy ADDRESS and ADDRESS_V2, so using
+          // the wrong one produces a signature the account cannot verify.
+          credentialType: creds.type,
         }),
       );
       continue;
@@ -240,9 +292,23 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
   if (rpc.Api.isSimulationError(enforced)) {
     const error = enforced as rpc.Api.SimulateTransactionErrorResponse;
     const events = diagnosticEventsOf(error);
+    const reason = reasonFromDiagnosticEvents(events);
+    // A guard decision is identifiable: the contract publishes its own
+    // `event_auth_checked/blocked/<reason>` event. Any other simulation failure
+    // — a contract trap, an absent trustline, a host misuse — is an error, not
+    // a block, and must not be reported as the guard refusing anything.
+    if (reason === null) {
+      return {
+        kind: "error",
+        detail: [
+          typeof error.error === "string" ? error.error : JSON.stringify(error.error),
+          ...summarizeDiagnosticEvents(events),
+        ].join("\n  "),
+      };
+    }
     return {
       kind: "blocked",
-      reason: reasonFromDiagnosticEvents(events),
+      reason,
       detail: typeof error.error === "string" ? error.error : JSON.stringify(error.error),
       diagnosticEvents: events,
     };

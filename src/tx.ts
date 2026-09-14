@@ -114,6 +114,23 @@ export function guardStorageLedgerKeys(guard: string): xdr.LedgerKey[] {
  * so the returned entry is only valid for that nonce — build a fresh entry per
  * submission rather than reusing one.
  */
+/**
+ * Credential kinds the host may demand for this account.
+ *
+ * Which one arrives is not the caller's choice — the RPC reports what the call
+ * requires, and it differs by call shape: an SAC `transfer` authorized by the
+ * account comes back as legacy `sorobanCredentialsAddress`, while a self-call
+ * such as `heartbeat` comes back as `sorobanCredentialsAddressV2` (CAP-71),
+ * whose signed payload additionally binds the account address.
+ *
+ * The contract itself is indifferent: `__check_auth` verifies the Ed25519
+ * signature against whatever digest the host presents, so the SDK's job is to
+ * build the preimage that matches the credential type it is answering.
+ */
+export type GuardCredentialType =
+  | "sorobanCredentialsAddress"
+  | "sorobanCredentialsAddressV2";
+
 export function buildGuardAuthEntry(params: {
   guard: string;
   call: ContractCall;
@@ -121,35 +138,61 @@ export function buildGuardAuthEntry(params: {
   nonce: bigint;
   signatureExpirationLedger: number;
   networkPassphrase: string;
+  credentialType?: GuardCredentialType;
 }): xdr.SorobanAuthorizationEntry {
-  const { guard, call, agent, nonce, signatureExpirationLedger, networkPassphrase } = params;
+  const {
+    guard,
+    call,
+    agent,
+    nonce,
+    signatureExpirationLedger,
+    networkPassphrase,
+    credentialType = "sorobanCredentialsAddress",
+  } = params;
   const rootInvocation = new xdr.SorobanAuthorizedInvocation({
     function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(
       invocationArgs(call),
     ),
     subInvocations: [],
   });
+  const networkId = createHash("sha256").update(networkPassphrase).digest();
+  const guardAddress = new Address(guard).toScAddress();
 
-  const preimage = xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
-    new xdr.HashIdPreimageSorobanAuthorization({
-      networkId: createHash("sha256").update(networkPassphrase).digest(),
-      nonce,
-      invocation: rootInvocation,
-      signatureExpirationLedger,
-    }),
-  );
+  const preimage =
+    credentialType === "sorobanCredentialsAddressV2"
+      ? xdr.HashIdPreimage.envelopeTypeSorobanAuthorizationWithAddress(
+          new xdr.HashIdPreimageSorobanAuthorizationWithAddress({
+            networkId,
+            nonce,
+            invocation: rootInvocation,
+            address: guardAddress,
+            signatureExpirationLedger,
+          }),
+        )
+      : xdr.HashIdPreimage.envelopeTypeSorobanAuthorization(
+          new xdr.HashIdPreimageSorobanAuthorization({
+            networkId,
+            nonce,
+            invocation: rootInvocation,
+            signatureExpirationLedger,
+          }),
+        );
+
   const digest = createHash("sha256").update(preimage.toXDR()).digest();
   const signature = agent.sign(digest);
 
+  const addressCredentials = new xdr.SorobanAddressCredentials({
+    address: guardAddress,
+    nonce,
+    signatureExpirationLedger,
+    signature: xdr.ScVal.scvBytes(signature),
+  });
+
   return new xdr.SorobanAuthorizationEntry({
-    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
-      new xdr.SorobanAddressCredentials({
-        address: new Address(guard).toScAddress(),
-        nonce,
-        signatureExpirationLedger,
-        signature: xdr.ScVal.scvBytes(signature),
-      }),
-    ),
+    credentials:
+      credentialType === "sorobanCredentialsAddressV2"
+        ? xdr.SorobanCredentials.sorobanCredentialsAddressV2(addressCredentials)
+        : xdr.SorobanCredentials.sorobanCredentialsAddress(addressCredentials),
     rootInvocation,
   });
 }
@@ -242,7 +285,15 @@ export function assembleFromSimulation(params: {
 
   if (guard) {
     const merged = [...data.getReadWrite()];
-    const seen = new Set(merged.map((key) => ledgerKeyId(key)));
+    // De-duplicate against BOTH footprint lists. A key appearing in read_only and
+    // read_write at once is an invalid footprint and the network rejects the
+    // transaction with `tx_soroban_invalid` — and RPC preflight commonly places
+    // the guard's own storage keys in read_only, so merging blindly into
+    // read_write would duplicate every one of them.
+    const seen = new Set([
+      ...data.getReadOnly().map((key) => ledgerKeyId(key)),
+      ...merged.map((key) => ledgerKeyId(key)),
+    ]);
     for (const key of guardStorageLedgerKeys(guard)) {
       const id = ledgerKeyId(key);
       if (!seen.has(id)) {

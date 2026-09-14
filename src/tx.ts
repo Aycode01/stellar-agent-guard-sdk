@@ -324,6 +324,63 @@ export function assembleFromSimulation(params: {
 }
 
 /**
+ * Human-readable dump of a simulation's declared resources and footprint.
+ *
+ * A `scecExceededLimit` rejection *after* inclusion means the ledger charged
+ * more of a resource than the transaction declared — a mismatch that only shows
+ * up as two bare numbers in an error payload. This makes the declaration
+ * legible next to the charge, which is the only way to tell an under-declaration
+ * from a genuine limit.
+ */
+export function describeSimulationResources(
+  simulation: unknown,
+  guard: string | null,
+): string {
+  const candidate = simulation as {
+    transactionData?: unknown;
+    minResourceFee?: string | number;
+    error?: unknown;
+  };
+  if (candidate.transactionData === undefined) {
+    return `  (simulation error, no resources declared)\n  error: ${JSON.stringify(candidate.error)}`;
+  }
+  const data =
+    candidate.transactionData instanceof SorobanDataBuilder
+      ? candidate.transactionData
+      : new SorobanDataBuilder(candidate.transactionData as never);
+  const built = data.build();
+  // The SDK's XDR classes expose camelCase properties (`writeBytes`,
+  // `footprint.readWrite`); only their serialised JSON form uses the wire's
+  // snake_case names. Reading the JSON shape here would silently yield
+  // `undefined` for every field.
+  const resources = (built as unknown as {
+    resources: {
+      instructions: number;
+      diskReadBytes: number;
+      writeBytes: number;
+      footprint: { readOnly: unknown[]; readWrite: unknown[] };
+    };
+  }).resources;
+  const declared = new Set(resources.footprint.readWrite.map((key) => ledgerKeyId(key as xdr.LedgerKey)));
+  const own = guard
+    ? guardStorageLedgerKeys(guard).map((key, index) => {
+        const name = GUARD_STORAGE_KEYS[index] ?? `#${index}`;
+        return declared.has(ledgerKeyId(key))
+          ? `${name}: declared read_write`
+          : `${name}: NOT in the footprint`;
+      })
+    : [];
+  return [
+    `  instructions: ${resources.instructions}`,
+    `  disk_read_bytes: ${resources.diskReadBytes}`,
+    `  write_bytes: ${resources.writeBytes}`,
+    `  footprint: ${resources.footprint.readOnly.length} read-only, ${resources.footprint.readWrite.length} read-write`,
+    `  minResourceFee: ${candidate.minResourceFee}`,
+    ...own.map((line) => `  guard key ${line}`),
+  ].join("\n");
+}
+
+/**
  * `resultXdr` arrives either as a base64 string or as a decoded value that
  * knows how to serialise itself, depending on SDK internals — normalise to a
  * string so failure reports are always copy-pasteable evidence.
@@ -415,6 +472,37 @@ function describeEvent(raw: unknown): string {
  */
 export function summarizeDiagnosticEvents(events: unknown[]): string[] {
   return events.map(describeEvent);
+}
+
+/**
+ * Was this post-inclusion failure a *stale-ledger resource declaration*?
+ *
+ * Diagnosed the hard way: the enforced simulation reports the write size for the
+ * window state it observed, and when the RPC serves a ledger snapshot that
+ * predates the write this SDK just made, the declared `writeBytes` is short by
+ * exactly one rolling-window entry (72 bytes on this contract). The transaction
+ * is then included and rejected by core with `scecExceededLimit` — a failure
+ * that is not the caller's fault and not a policy decision.
+ *
+ * It is safe to re-simulate and retry: a transaction rejected for exceeding a
+ * resource limit applies **nothing** (state is rolled back), and the very fact
+ * of inclusion proves the ledger has since advanced past the stale snapshot.
+ * Contract-level `Auth` failures are deliberately *not* matched here — those are
+ * the guard doing its job and must surface as a block, not be retried.
+ */
+export function isStaleLedgerResourceFailure(
+  failure: NonNullable<SubmissionResult["failure"]>,
+): boolean {
+  const haystack = [
+    failure.message,
+    failure.resultCode ?? "",
+    ...failure.diagnosticEvents.map((event) => JSON.stringify(event)),
+  ].join("\n");
+  // The host names this `insufficient_refundable_fee` as an error code and
+  // "insufficient refundable fee" in prose; match either spelling.
+  return /scecExceededLimit|exceeds amount specified|insufficient[_ ]refundable[_ ]fee/i.test(
+    haystack,
+  );
 }
 
 /** Full, copy-pasteable rendering of a failed submission, for evidence. */

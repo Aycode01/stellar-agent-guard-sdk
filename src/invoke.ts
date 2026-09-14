@@ -22,7 +22,9 @@ import {
   assembleFromSimulation,
   buildGuardAuthEntry,
   buildInitialEnvelope,
+  describeSimulationResources,
   describeSubmissionFailure,
+  isStaleLedgerResourceFailure,
   signAccountAuthEntry,
   summarizeDiagnosticEvents,
   submitAndPoll,
@@ -46,7 +48,15 @@ export type InvokeOutcome =
       /** Diagnostic events emitted by the contract during enforced simulation. */
       diagnosticEvents: unknown[];
     }
-  | { kind: "error"; detail: string };
+  | {
+      kind: "error";
+      detail: string;
+      /**
+       * Set when the failure is a stale-ledger resource declaration that a
+       * re-simulation can fix. See `isStaleLedgerResourceFailure` in `tx.ts`.
+       */
+      retryable?: "stale_ledger_resource_limit";
+    };
 
 export interface InvokeParams {
   server: rpc.Server;
@@ -66,8 +76,12 @@ export interface InvokeParams {
  * Topic symbols of a contract event, tolerating the several shapes RPC and the
  * SDK use for the same event: decoded `xdr.DiagnosticEvent` instances, bare
  * event objects, or base64 XDR strings in a JSON error payload.
+ *
+ * Exported because a telemetry consumer needs the same tolerance to read a
+ * guard decision out of either stream, and duplicating the shape-handling would
+ * mean two places to get it wrong.
  */
-function topicSymbols(raw: unknown): string[] {
+export function topicSymbols(raw: unknown): string[] {
   const candidate = raw as {
     event?: { body?: unknown };
     body?: unknown;
@@ -151,8 +165,37 @@ function diagnosticEventsOf(response: unknown): unknown[] {
  * pass. Returns a discriminated result rather than throwing, so callers can
  * decide whether a block is an expected outcome (agents hitting a guardrail) or
  * a failure worth surfacing.
+ *
+ * One bounded retry is built in, for a failure mode that is real and measurable
+ * rather than theoretical: if the enforced simulation prices the transaction
+ * against a ledger snapshot that predates the write this SDK just made, the
+ * declared byte-write budget can be short and core rejects the transaction
+ * *after* inclusion with `scecExceededLimit`. See `isStaleLedgerResourceFailure`
+ * for why retrying is safe. Every other failure — including a guard block — is
+ * returned untouched, and the retry is reported in `retried` so it is never
+ * silent.
  */
 export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
+  const first = await invokePipeline(params);
+  if (first.kind !== "error" || first.retryable !== "stale_ledger_resource_limit") {
+    return first;
+  }
+  if (params.dryRun) return first;
+
+  const second = await invokePipeline(params);
+  // If the retry also fails, report the retry's outcome: it is the more recent
+  // and more informative of the two.
+  if (second.kind === "error") {
+    return {
+      ...second,
+      detail: `retried after a stale-ledger resource rejection; still failed\n${second.detail}`,
+    };
+  }
+  return second;
+}
+
+/** One attempt: simulate → sign → enforce → submit. No retry logic lives here. */
+async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
   const { server, source, call, networkPassphrase } = params;
   const operation = Operation.invokeContractFunction({
     contract: call.contract,
@@ -289,6 +332,9 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
     guard: params.guardAuth?.guard ?? null,
   });
   const enforced = await server.simulateTransaction(enforcingTx);
+  if (process.env["SAG_DEBUG_RESOURCES"] === "1") {
+    console.log(`[debug] enforced simulation:\n${describeSimulationResources(enforced, params.guardAuth?.guard ?? null)}`);
+  }
   if (rpc.Api.isSimulationError(enforced)) {
     const error = enforced as rpc.Api.SimulateTransactionErrorResponse;
     const events = diagnosticEventsOf(error);
@@ -339,6 +385,9 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
     return {
       kind: "error",
       detail: `tx ${submission.hash} ${describeSubmissionFailure(submission.failure)}`,
+      ...(isStaleLedgerResourceFailure(submission.failure)
+        ? { retryable: "stale_ledger_resource_limit" as const }
+        : {}),
     };
   }
   return { kind: "allowed", submission };

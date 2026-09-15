@@ -167,31 +167,93 @@ function mergeTransactionRecords(
 }
 
 /**
- * Re-read every recorded transaction from the RPC and stamp the result. This is
- * what makes the fixture self-verifying: anyone can re-run the bring-up script
- * and see each recorded hash independently confirmed on chain.
+ * Re-read one recorded transaction from the RPC. Returns a fresh verification
+ * stamp plus whether the hash is confirmed SUCCESS on chain.
+ */
+async function reVerify(
+  server: rpc.Server,
+  hash: string,
+): Promise<{ success: boolean; stamp: NonNullable<TransactionRecord["lastVerified"]> }> {
+  const result = await server.getTransaction(hash).catch(() => null);
+  const status = result?.status ?? "NOT_FOUND";
+  return {
+    success: status === rpc.Api.GetTransactionStatus.SUCCESS,
+    stamp: {
+      at: new Date().toISOString(),
+      status,
+      ledger: result && "ledger" in result ? (result.ledger ?? null) : null,
+    },
+  };
+}
+
+/**
+ * Re-read every recorded one-time bring-up transaction and stamp the result.
+ * This is what makes the fixture self-verifying: anyone can re-run the bring-up
+ * script and see each recorded hash independently confirmed on chain.
  */
 async function verifyTransactionRecords(
   server: rpc.Server,
   records: TransactionRecords,
 ): Promise<{ records: TransactionRecords; allSuccess: boolean }> {
-  const at = new Date().toISOString();
   let allSuccess = true;
   const verified: TransactionRecords = {};
   for (const [key, record] of Object.entries(records) as Array<
     [TransactionKey, TransactionRecord]
   >) {
-    const result = await server.getTransaction(record.hash).catch(() => null);
-    const status = result?.status ?? "NOT_FOUND";
-    if (status !== rpc.Api.GetTransactionStatus.SUCCESS) allSuccess = false;
-    verified[key] = {
-      ...record,
-      lastVerified: {
-        at,
-        status,
-        ledger: result && "ledger" in result ? (result.ledger ?? null) : null,
-      },
-    };
+    const { success, stamp } = await reVerify(server, record.hash);
+    if (!success) allSuccess = false;
+    verified[key] = { ...record, lastVerified: stamp };
+  }
+  return { records: verified, allSuccess };
+}
+
+/**
+ * Mint records are append-only and keyed by their own hash, so each top-up that
+ * actually broadcast stays on the record. Merge keeps every existing entry and
+ * adds only hashes that are not already present.
+ */
+function mergeMints(previous: MintRecord[], created: MintRecord[]): MintRecord[] {
+  const merged = [...previous];
+  const seen = new Set(merged.map((entry) => entry.hash));
+  for (const entry of created) {
+    if (seen.has(entry.hash)) continue;
+    seen.add(entry.hash);
+    merged.push(entry);
+  }
+  return merged;
+}
+
+/**
+ * Every mint this deployment has ever broadcast.
+ *
+ * The fixture used to keep a single `transactions.mint` slot that the top-up
+ * step overwrote, which is the same evidence-loss failure mode as the original
+ * overwrite bug: re-running bring-up after the integration suite had spent funds
+ * minted again and silently replaced the previous hash. The legacy slot is
+ * migrated into this list rather than dropped, so no historical mint is lost.
+ */
+function previousMints(existing: FixtureFile | null): MintRecord[] {
+  const instance = existing?.phase2EnforcementInstance;
+  const list = [...(instance?.mints ?? [])];
+  const legacy = instance?.transactions?.mint;
+  if (legacy && !list.some((entry) => entry.hash === legacy.hash)) {
+    // No amount/balanceBefore: the old slot never recorded them.
+    list.push({ ...legacy });
+  }
+  return list;
+}
+
+/** Re-read every recorded mint, same standard as the bring-up transactions. */
+async function verifyMints(
+  server: rpc.Server,
+  mints: MintRecord[],
+): Promise<{ records: MintRecord[]; allSuccess: boolean }> {
+  let allSuccess = true;
+  const verified: MintRecord[] = [];
+  for (const mint of mints) {
+    const { success, stamp } = await reVerify(server, mint.hash);
+    if (!success) allSuccess = false;
+    verified.push({ ...mint, lastVerified: stamp });
   }
   return { records: verified, allSuccess };
 }
@@ -307,6 +369,10 @@ interface Submission {
  * only durable evidence of how the instance was created. `lastVerified` is
  * refreshed on every run by re-reading each hash from the RPC, so the record
  * stays independently checkable rather than being a claim frozen at deploy time.
+ *
+ * This holds the *one-time* bring-up transactions. Repeated actions — mints —
+ * are not a slot in this map but the append-only `mints` list below, because a
+ * repeated action on a fixed key is precisely how a hash gets lost.
  */
 type TransactionKey =
   | "tokenCreate"
@@ -314,8 +380,13 @@ type TransactionKey =
   | "initialize"
   | "trustlineRecipient"
   | "trustlineOutsider"
-  | "mint"
-  | "setPolicy";
+  | "setPolicy"
+  /**
+   * Legacy single-mint slot, superseded by the append-only `mints` list. Nothing
+   * writes it any more; it is read only so an existing fixture's mint hash can be
+   * migrated into `mints` instead of being dropped.
+   */
+  | "mint";
 
 interface TransactionRecord {
   hash: string;
@@ -325,6 +396,18 @@ interface TransactionRecord {
   lastVerified?: { at: string; status: string; ledger: number | null };
 }
 
+/**
+ * One mint that actually broadcast. Keyed by its own hash and only ever
+ * appended: a top-up is a real transaction, and its hash is evidence that must
+ * survive every later run.
+ */
+interface MintRecord extends TransactionRecord {
+  /** Decimal string of the amount minted, when recorded by the append-only path. */
+  amount?: string;
+  /** Decimal string of the guard's balance immediately before this mint. */
+  balanceBefore?: string;
+}
+
 type TransactionRecords = Partial<Record<TransactionKey, TransactionRecord>>;
 
 interface FixtureFile {
@@ -332,6 +415,7 @@ interface FixtureFile {
   phase1HistoricalInstance?: Record<string, unknown>;
   phase2EnforcementInstance?: Record<string, unknown> & {
     transactions?: TransactionRecords;
+    mints?: MintRecord[];
   };
   runs?: Array<{ at: string; actions: string[] }>;
 }
@@ -395,6 +479,8 @@ async function main(): Promise<void> {
   const deployLog: string[] = [];
   /** Transactions created by *this* run; merged into the preserved record. */
   const createdTransactions: TransactionRecords = {};
+  /** Mints broadcast by *this* run; appended to the preserved list. */
+  const createdMints: MintRecord[] = [];
   const record = (key: TransactionKey, submission: Submission) => {
     createdTransactions[key] = {
       hash: submission.hash,
@@ -591,7 +677,16 @@ async function main(): Promise<void> {
       accountSigners: [keys.issuer],
     });
     if (outcome.kind !== "allowed") throw new Error(`mint failed: ${json(outcome)}`);
-    record("mint", outcome.submission);
+    // Appended, never assigned to a fixed slot: this is a distinct transaction
+    // from any earlier top-up and needs its own permanent record.
+    createdMints.push({
+      hash: outcome.submission.hash,
+      ledger: outcome.submission.ledger,
+      status: "SUCCESS",
+      recordedAt: nowIso(),
+      amount: MINT_AMOUNT.toString(),
+      balanceBefore: currentBalance.toString(),
+    });
     step(`    tx ${outcome.submission.hash} (ledger ${outcome.submission.ledger})`);
   } else {
     step(`[6] guard already holds ${currentBalance} of the test token`);
@@ -637,16 +732,28 @@ async function main(): Promise<void> {
 
   // ── Fixture record: preserve, re-verify, append (never overwrite) ─────
   const previous = existing?.phase2EnforcementInstance;
+  const mints = mergeMints(previousMints(existing), createdMints);
   const transactions = mergeTransactionRecords(previous?.transactions, createdTransactions);
+  // The legacy single-mint slot now lives in `mints`; carrying it forward would
+  // restore exactly the fixed shape that could silently lose a hash.
+  delete transactions.mint;
   const verification = await verifyTransactionRecords(server, transactions);
+  const mintVerification = await verifyMints(server, mints);
+  const allSuccess = verification.allSuccess && mintVerification.allSuccess;
   const runs = [...(existing?.runs ?? []), { at: nowIso(), actions: deployLog }];
-  if (!verification.allSuccess) {
+  if (!allSuccess) {
     console.warn("WARNING: at least one recorded transaction did not verify as SUCCESS");
   }
   step(
     `[9] recorded transactions re-verified: ${Object.values(verification.records)
       .map((entry) => `${entry?.lastVerified?.status ?? "?"}@${entry?.lastVerified?.ledger ?? "?"}`)
       .join(" ")}`,
+  );
+  step(
+    `    mints on record: ${mintVerification.records.length} ` +
+      `(${mintVerification.records
+        .map((entry) => `${entry.hash.slice(0, 8)}… ${entry.lastVerified?.status ?? "?"}`)
+        .join(", ")})`,
   );
 
   const fixtures = {
@@ -669,6 +776,13 @@ async function main(): Promise<void> {
         "Live Phase 2 instance: a fresh instance of the identical Phase 1 artifact " +
         "(byte-for-byte, hash-verified below), with keys held by this repo. Enforcement " +
         "integration tests run against this instance.",
+      snapshotNote:
+        "`status`, `policy` and `guardTokenBalance` below are a SNAPSHOT taken when this " +
+        "script last ran — not current state. The integration suite spends funds and the " +
+        "rolling window moves after every run, so these fields go stale immediately. " +
+        "Query the instance directly for current values (`npm run inspect`). The " +
+        "`transactions` and `mints` records are not snapshots: they are sealed, " +
+        "append-only, and re-verified against the chain on every run.",
       guard,
       wasmHashLedger: finalIdentity.reportedWasmHash,
       wasmHashFetched: finalIdentity.fetchedSha256,
@@ -685,7 +799,9 @@ async function main(): Promise<void> {
         outsider: keys.outsider.publicKey(),
       },
       transactions: verification.records,
-      allRecordedTransactionsVerified: verification.allSuccess,
+      // Append-only: every mint that broadcast, keyed by hash. Never overwritten.
+      mints: mintVerification.records,
+      allRecordedTransactionsVerified: allSuccess,
       status: status.value ?? status.error ?? null,
       policy: policyNow.value ?? policyNow.error ?? null,
       guardTokenBalance: balanceNow.value ?? balanceNow.error ?? null,

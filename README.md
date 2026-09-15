@@ -166,6 +166,12 @@ documentation's `auth_checked`.
 Final on-chain evidence for the suite is recorded in
 [`tests/fixtures/integration-evidence.md`](tests/fixtures/integration-evidence.md).
 
+Two fields in `tests/fixtures/phase2-instance.json` must be read carefully: `status`,
+`policy` and `guardTokenBalance` are a **snapshot from deploy time, not current state** —
+the suite spends funds and the rolling window moves, so query the instance directly
+(`npm run inspect`) for present values. `transactions` and `mints` are the opposite: sealed,
+append-only records re-verified against the chain on every run.
+
 ## Development
 
 ```bash

@@ -77,6 +77,29 @@ CI reports **two** checks, deliberately:
 - The same rule applies to `stellar-agent-guard-contracts` and
   `stellar-agent-guard-dashboard`.
 
+## Issues and labels
+
+The tracked backlog uses one label taxonomy, applied identically in every repo in this org.
+It is defined and applied by `scripts/create-issue-backlog.sh`, which is idempotent — safe to
+re-run, and reports a repo it cannot write to rather than aborting the run:
+
+| Label | Meaning |
+| --- | --- |
+| `tier:blocker` | blocks a phase exit; not fixable by an agent alone |
+| `tier:maintainer-decision` | a human call is required; do not guess |
+| `tier:enhancement` | non-blocking; revisit when its trigger is met |
+| `scope:sdk` / `scope:contracts` / `scope:dashboard` | which repo's code/config the issue concerns, so the backlog can be filtered across repos in one query |
+
+An issue carries at least one `tier:` label and exactly one `scope:` label.
+
+Wave complexity (**Trivial / Medium / High**) is deliberately **not** a label here: the Drips
+Wave docs assign it when an issue is added to a Wave Program in the dashboard, and the Wave
+bot applies its own program label. Keeping the tier taxonomy orthogonal to it means neither
+scheme has to be renamed later.
+
+Anything still open when a phase closes gets an issue, not just a note in a pull request or a
+chat log.
+
 ## Local gates before pushing
 
 ```bash

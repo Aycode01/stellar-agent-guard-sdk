@@ -1,0 +1,59 @@
+# The repo's branch-protection ruleset requires a status check named exactly
+# `ci`. The job below is therefore named `ci` — both the job name and its `name:`
+# key — so the check this workflow reports is the one the ruleset gates on.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only: CI inspects the repo and runs tests; it never writes to it.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint
+        run: npm run lint
+
+      - name: unit tests
+        run: npm test
+
+      # The integration suite is the Phase 2 exit criterion, so it runs in CI —
+      # but it signs real transactions against the live testnet instance, which
+      # needs the deployment's keys. Those live in `.env.phase2` (gitignored) and
+      # are supplied here through the `PHASE2_ENV_FILE` secret.
+      #
+      # When the secret is absent (forks, and any PR from outside the repo) the
+      # suite is skipped with an explicit notice rather than a fake pass: a
+      # missing credential must never render as a green "integration tests"
+      # check, because that would be a claim about on-chain behaviour that was
+      # never made.
+      - name: integration tests (live testnet)
+        env:
+          PHASE2_ENV_FILE: ${{ secrets.PHASE2_ENV_FILE }}
+        run: |
+          if [ -z "${PHASE2_ENV_FILE:-}" ]; then
+            echo "::notice title=integration tests skipped::PHASE2_ENV_FILE secret is not set; the live testnet suite was NOT run."
+            exit 0
+          fi
+          printf '%s\n' "$PHASE2_ENV_FILE" > .env.phase2
+          npm run test:integration

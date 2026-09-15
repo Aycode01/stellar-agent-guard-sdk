@@ -32,7 +32,6 @@ import {
   Account,
   Address,
   Keypair,
-  Operation,
   SorobanDataBuilder,
   Transaction,
   TransactionBuilder,

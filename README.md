@@ -182,10 +182,20 @@ npm run test:integration             # live testnet; needs .env.phase2
 npm run inspect                      # read-only live inspection
 ```
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, and both suites, reporting a status
-check named exactly `ci`. The live suite needs the deployment's keys; in CI they come from
-the `PHASE2_ENV_FILE` secret, and when it is absent the suite is **skipped with an explicit
-notice** rather than reported as a pass.
+CI (`.github/workflows/ci.yml`) reports **two separate checks**, deliberately:
+
+- **`ci`** — required by the branch-protection ruleset. Runs typecheck, lint and the unit
+tests. No secret is involved, so nothing in it can silently mask a skip: every step either
+really runs or the job fails.
+- **`integration-live (informational)`** — separate and **not required**. Runs the live
+testnet suite and reports passed / failed / skipped as its own line. The suite signs real
+transactions, so it needs the deployment's keys from the `PHASE2_ENV_FILE` secret; until
+that secret exists the job is **skipped as its own check, never reported as a pass**, and a
+green `ci` never implies the live suite ran.
+
+They are split because a single required job containing the live suite could go green on a
+missing secret — a required check that can pass without the security-critical suite running
+does not mean what a required check is supposed to mean.
 
 ## Publishing
 

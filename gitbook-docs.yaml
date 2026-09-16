@@ -1,0 +1,28 @@
+site:
+  title: Stellar Agent Guard — SDK
+  structure:
+    - type: section
+      key: section-sdk
+      title: SDK Documentation
+      default: true
+      path: sdk
+      children:
+        - type: space
+          key: space-getting-started
+          title: Getting Started
+          path: getting-started
+          default: true
+          content:
+            directory: ./
+        - type: space
+          key: space-concepts
+          title: Concepts
+          path: concepts
+          content:
+            directory: ./concepts
+        - type: space
+          key: space-api
+          title: API Reference
+          path: api
+          content:
+            directory: ./api

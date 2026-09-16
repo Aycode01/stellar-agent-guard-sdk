@@ -32,7 +32,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "node --test tests/unit/*.test.ts",
+    "test": "node --import tsx --test tests/unit/*.test.ts",
     "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.ts",
     "inspect": "node scripts/inspect-deployment.ts",
     "deploy:phase2": "node scripts/deploy-phase2-instance.ts",
@@ -45,6 +45,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.5.1",
     "eslint": "^10.10.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.70.0"
   }

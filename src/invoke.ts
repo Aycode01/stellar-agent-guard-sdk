@@ -222,7 +222,7 @@ export type EnforcementOutcome =
 
 /** One attempt: simulate → sign → enforce → submit. No retry logic lives here. */
 async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
-  const { server, call } = params;
+  const { server } = params;
   const enforced = await enforceCall(params);
   if (enforced.kind !== "admissible") return enforced;
 

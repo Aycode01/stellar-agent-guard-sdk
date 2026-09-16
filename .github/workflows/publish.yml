@@ -1,0 +1,58 @@
+# Publish to npm when a version tag is pushed.
+#
+# This workflow is added and ready, but it has NOT been run: it needs the
+# `NPM_TOKEN` repository secret, which only a maintainer can add. Until that
+# secret exists the package is "publish-ready, not published" — see the README.
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: install
+        run: npm ci
+
+      # Never publish something that does not pass its own gates.
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint
+        run: npm run lint
+
+      - name: unit tests
+        run: npm test
+
+      # The tag is the source of truth for what should be released, so refuse to
+      # proceed when it disagrees with package.json — publishing v0.2.0 from a
+      # v0.1.0 tag is not recoverable.
+      - name: confirm the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "::error title=tag/version mismatch::tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+          echo "tag ${GITHUB_REF_NAME} matches package.json version ${version}"
+
+      - name: publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

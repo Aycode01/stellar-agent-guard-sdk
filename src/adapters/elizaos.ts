@@ -76,11 +76,21 @@ export function createGuardValidator(options: ElizaGuardOptions): ElizaValidator
   };
 }
 
-/** Wrap an existing action, returning a copy whose `validate` composes the guard. */
+/**
+ * Wrap an existing action, returning a copy whose `validate` composes the guard.
+ *
+ * The returned `validate` is deliberately typed as the full `ElizaValidator`, not
+ * as the wrapped action's own (possibly narrower) signature. An action authored
+ * with `validate: async () => boolean` is assignable to `ElizaValidator` — extra
+ * parameters are allowed to be ignored — but the *wrapped* validator genuinely
+ * accepts all four arguments and forwards them to the base, so reporting the
+ * narrower type would both misdescribe it and prevent a caller from invoking the
+ * action the way the runtime does.
+ */
 export function guardAction<T extends ElizaActionLike>(
   action: T,
   options: Omit<ElizaGuardOptions, "baseValidate">,
-): T {
+): Omit<T, "validate"> & { validate: ElizaValidator } {
   return {
     ...action,
     validate: createGuardValidator({ ...options, baseValidate: action.validate }),

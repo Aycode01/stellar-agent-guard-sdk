@@ -55,7 +55,7 @@ describe("GuardTelemetryListener against the live guard", () => {
 
     // `getEvents` is eventually consistent with the ledger we just wrote to;
     // poll briefly rather than assume the very first page sees it.
-    let events = await pollUntil(start, (found) =>
+    const events = await pollUntil(start, (found) =>
       found.some((event) => event.transactionHash === outcome.submission.hash),
     );
 

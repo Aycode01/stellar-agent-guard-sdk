@@ -45,11 +45,7 @@ git show --stat HEAD
   GitHub does not permit self-approval;
 - allowed merge methods are `merge`, `squash` and `rebase`.
 
-**Solo-maintainer bypass policy.** As a solo-maintained repository, the named-actor bypass on
-`main-protection` is the maintainer's normal path to merge — not an emergency-only exception.
-Ordinary PRs still go through the full `ci` required-check gate; the bypass only removes the
-structurally-unsatisfiable second-reviewer requirement. If a second maintainer joins in future,
-they should be added as a required reviewer and this section revisited.
+**Solo-maintainer bypass policy.** As a solo-maintained repository, PRs require a green `ci` check but no second-party review; the maintainer's named-actor bypass on `main-protection` is used deliberately for merges, and that is documented here as standard procedure — not an emergency exception. Ordinary PRs still go through the full `ci` required-check gate; the bypass only removes the structurally-unsatisfiable second-reviewer requirement. If a second maintainer joins in future, they should be added as a required reviewer and this section revisited.
 
 Do not modify the ruleset to work around a required check that is legitimately blocked.
 

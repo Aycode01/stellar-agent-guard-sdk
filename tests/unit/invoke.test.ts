@@ -1,0 +1,276 @@
+/**
+ * Network-free invoke pipeline tests.
+ *
+ * The fake server exercises the real transaction builders and XDR signing path;
+ * only the JSON-RPC boundary is replaced. In particular, dry-run safety is
+ * asserted at that boundary by making both `sendTransaction` and
+ * `getTransaction` fail loudly if reached.
+ */
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { Account, Address, Keypair, SorobanDataBuilder, rpc, xdr } from "@stellar/stellar-sdk";
+import {
+  BroadcastError,
+  SigningError,
+  SimulationError,
+} from "../../src/errors.ts";
+import { invoke, type InvokeParams } from "../../src/invoke.ts";
+
+const NETWORK = "Test SDF Network ; September 2015";
+const TOKEN = "CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB";
+const GUARD = "CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44";
+
+function simulationSuccess(resourceFee = "777", auth: xdr.SorobanAuthorizationEntry[] = []): object {
+  return {
+    transactionData: new SorobanDataBuilder().setResources(10, 20, 30).build(),
+    minResourceFee: resourceFee,
+    result: { auth },
+    events: [],
+  };
+}
+
+function blockedSimulation(): object {
+  return {
+    error: "HostError: Error(Auth, InvalidAction)",
+    events: [
+      {
+        event: {
+          body: {
+            v0: {
+              topics: ["event_auth_checked", "blocked", "per_tx_cap_exceeded"].map((topic) =>
+                xdr.ScVal.scvSymbol(topic),
+              ),
+              data: xdr.ScVal.scvVoid(),
+            },
+          },
+        },
+      },
+    ],
+  };
+}
+
+interface MockServer {
+  server: rpc.Server;
+  simulateCalls: number;
+  sendCalls: number;
+  pollCalls: number;
+}
+
+function mockServer(
+  replies: Array<object | Error>,
+  send: () => unknown = () => {
+    throw new Error("dry-run must not call sendTransaction");
+  },
+): MockServer {
+  const counts = { simulateCalls: 0, sendCalls: 0, pollCalls: 0 };
+  const server = {
+    async getAccount(publicKey: string): Promise<Account> {
+      return new Account(publicKey, "17");
+    },
+    async getLatestLedger(): Promise<{ sequence: number }> {
+      return { sequence: 100 };
+    },
+    async simulateTransaction(): Promise<object> {
+      counts.simulateCalls += 1;
+      const reply = replies.shift();
+      if (reply === undefined) throw new Error(`unexpected simulation #${counts.simulateCalls}`);
+      if (reply instanceof Error) throw reply;
+      return reply;
+    },
+    async sendTransaction(): Promise<unknown> {
+      counts.sendCalls += 1;
+      return send();
+    },
+    async getTransaction(): Promise<never> {
+      counts.pollCalls += 1;
+      throw new Error("dry-run must not call getTransaction");
+    },
+  } as unknown as rpc.Server;
+  return {
+    server,
+    get simulateCalls() {
+      return counts.simulateCalls;
+    },
+    get sendCalls() {
+      return counts.sendCalls;
+    },
+    get pollCalls() {
+      return counts.pollCalls;
+    },
+  };
+}
+
+function baseParams(server: rpc.Server, source: Keypair, agent: Keypair): InvokeParams {
+  return {
+    server,
+    source,
+    networkPassphrase: NETWORK,
+    guardAuth: { guard: GUARD, agent },
+    call: { contract: TOKEN, fn: "noop", args: [] },
+  };
+}
+
+function dryParams(
+  server: rpc.Server,
+  source: Keypair,
+  agent: Keypair,
+): InvokeParams & { dryRun: true } {
+  return { ...baseParams(server, source, agent), dryRun: true };
+}
+
+function requiredAddressAuth(address: string): xdr.SorobanAuthorizationEntry {
+  const invocation = new xdr.InvokeContractArgs({
+    contractAddress: new Address(TOKEN).toScAddress(),
+    functionName: "noop",
+    args: [],
+  });
+  return new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: new Address(address).toScAddress(),
+        nonce: 1n,
+        signatureExpirationLedger: 110,
+        signature: xdr.ScVal.scvVoid(),
+      }),
+    ),
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(invocation),
+      subInvocations: [],
+    }),
+  });
+}
+
+describe("invoke dry run", () => {
+  it("returns the complete five-stage trace and fees without send or poll RPCs", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const mock = mockServer([simulationSuccess("777"), simulationSuccess("777")]);
+
+    const result = await invoke(dryParams(mock.server, source, agent));
+
+    assert.equal(result.kind, "dry_run");
+    assert.equal(result.admissible, true);
+    assert.equal(result.verdict, "admissible");
+    assert.equal(result.error, null);
+    assert.deepEqual(result.fees, {
+      resourceFeeStroops: 777n,
+      inclusionFeeStroops: 100n,
+      totalFeeStroops: 877n,
+    });
+    assert.deepEqual(result.diagnostics, []);
+    assert.deepEqual(
+      result.steps.map((step) => step.name),
+      ["probe", "sign", "simulate", "verdict", "fees"],
+    );
+    for (const step of result.steps) {
+      assert.equal(step.ok, true);
+      assert.ok(Number.isFinite(step.durationMs));
+      assert.ok(step.durationMs >= 0);
+    }
+    assert.equal(mock.simulateCalls, 2);
+    assert.equal(mock.sendCalls, 0);
+    assert.equal(mock.pollCalls, 0);
+    assert.ok(!("submission" in result));
+    assert.ok(!("txHash" in result));
+  });
+
+  it("returns a blocked verdict, reason, diagnostics, and zero charged fees", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const mock = mockServer([simulationSuccess(), blockedSimulation()]);
+
+    const result = await invoke(dryParams(mock.server, source, agent));
+
+    assert.equal(result.kind, "dry_run");
+    assert.equal(result.admissible, false);
+    assert.equal(result.verdict, "blocked");
+    assert.equal(result.reason, "per_tx_cap_exceeded");
+    assert.equal(result.error, null);
+    assert.match(result.detail ?? "", /InvalidAction/);
+    assert.equal(result.diagnostics.length, 1);
+    assert.deepEqual(result.fees, {
+      resourceFeeStroops: 0n,
+      inclusionFeeStroops: 0n,
+      totalFeeStroops: 0n,
+    });
+    assert.equal(mock.sendCalls, 0);
+    assert.equal(mock.pollCalls, 0);
+  });
+
+  it("returns a typed undetermined result and partial trace for a technical simulation failure", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const mock = mockServer([simulationSuccess(), { error: "HostError: contract trap" }]);
+
+    const result = await invoke(dryParams(mock.server, source, agent));
+
+    assert.equal(result.verdict, "undetermined");
+    assert.ok(result.error instanceof SimulationError);
+    assert.equal(result.error.stage, "simulate");
+    assert.deepEqual(
+      result.steps.map((step) => [step.name, step.ok]),
+      [
+        ["probe", true],
+        ["sign", true],
+        ["simulate", false],
+        ["verdict", false],
+        ["fees", true],
+      ],
+    );
+    assert.equal(mock.sendCalls, 0);
+  });
+
+  it("retains the original probe failure cause in an undetermined result", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const cause = new Error("RPC unavailable");
+    const mock = mockServer([cause]);
+
+    const result = await invoke(dryParams(mock.server, source, agent));
+
+    assert.equal(result.verdict, "undetermined");
+    assert.ok(result.error instanceof SimulationError);
+    assert.equal(result.error.stage, "probe");
+    assert.equal(result.error.cause, cause);
+    assert.deepEqual(
+      result.steps.map((step) => step.name),
+      ["probe", "verdict", "fees"],
+    );
+    assert.equal(result.steps[0]?.ok, false);
+    assert.equal(mock.sendCalls, 0);
+  });
+});
+
+describe("invoke typed failures", () => {
+  it("returns SigningError when required authorization has no matching key", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const required = Keypair.random();
+    const auth = requiredAddressAuth(required.publicKey());
+    const mock = mockServer([simulationSuccess("0", [auth])]);
+    const result = await invoke(baseParams(mock.server, source, agent));
+
+    assert.equal(result.kind, "error");
+    assert.ok(result.error instanceof SigningError);
+    assert.equal(result.error.address, required.publicKey());
+    assert.equal(mock.simulateCalls, 1);
+    assert.equal(mock.sendCalls, 0);
+  });
+
+  it("returns BroadcastError when the real assembly path reaches a failed send", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const transport = new Error("send transport failed");
+    const mock = mockServer([simulationSuccess("555"), simulationSuccess("555")], () => {
+      throw transport;
+    });
+    const result = await invoke(baseParams(mock.server, source, agent));
+
+    assert.equal(result.kind, "error");
+    assert.ok(result.error instanceof BroadcastError);
+    assert.equal(result.error.cause, transport);
+    assert.equal(mock.simulateCalls, 2);
+    assert.equal(mock.sendCalls, 1);
+    assert.equal(mock.pollCalls, 0);
+  });
+});

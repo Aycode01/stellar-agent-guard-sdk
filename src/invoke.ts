@@ -32,6 +32,7 @@ import {
   describeSimulationResources,
   describeSubmissionFailure,
   isStaleLedgerResourceFailure,
+  parseSimulationResourceFee,
   signAccountAuthEntry,
   summarizeDiagnosticEvents,
   submitAndPoll,
@@ -279,16 +280,19 @@ async function invokeDryRun(params: InvokeParams): Promise<InvokeDryRunResult> {
 
   if (enforced.kind === "admissible") {
     try {
-      resourceFee = BigInt(enforced.simulation.minResourceFee);
+      resourceFee = parseSimulationResourceFee(enforced.simulation.minResourceFee);
     } catch (cause) {
       verdict = "undetermined";
       detail = `enforced simulation succeeded but returned an invalid resource fee: ${
         cause instanceof Error ? cause.message : String(cause)
       }`;
-      error = new SimulationError("enforced simulation returned an invalid resource fee", {
-        stage: "simulate",
-        cause,
-      });
+      error =
+        cause instanceof GuardError
+          ? cause
+          : new SimulationError("enforced simulation returned an invalid resource fee", {
+              stage: "simulate",
+              cause,
+            });
       feesOk = false;
     }
   }

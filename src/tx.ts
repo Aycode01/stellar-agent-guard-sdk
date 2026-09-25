@@ -41,12 +41,18 @@ import {
   verify as verifyEd25519,
   xdr,
 } from "@stellar/stellar-sdk";
-import { BroadcastError, SigningError, SimulationError } from "./errors.ts";
+import {
+  BroadcastError,
+  ContractResponseError,
+  SigningError,
+  SimulationError,
+} from "./errors.ts";
 
 /** Extra ledger validity granted to a guard auth entry when it is signed. */
 const SIG_EXPIRATION_LEDGERS = 10_000;
 /** Inclusion fee floor, in stroops, for a single-operation transaction. */
 const INCLUSION_FEE = "100";
+const MAX_RESOURCE_FEE = 2n ** 64n - 1n;
 
 export interface ContractCall {
   /** Contract address (C…) to invoke. */
@@ -54,6 +60,39 @@ export interface ContractCall {
   /** Function name as it appears in the contract spec. */
   fn: string;
   args: xdr.ScVal[];
+}
+
+/**
+ * Parse the RPC's simulation resource fee without allowing a missing or
+ * malformed value to masquerade as a free transaction.
+ *
+ * Stellar SDK versions have surfaced this field as a decimal string, number,
+ * or bigint. All three are accepted only when they are an exact non-negative
+ * u64. A missing field is invalid, not zero: callers must report the simulation
+ * as undetermined rather than make a budget decision from fabricated pricing.
+ */
+export function parseSimulationResourceFee(raw: unknown): bigint {
+  let value: bigint;
+  if (typeof raw === "bigint") {
+    value = raw;
+  } else if (typeof raw === "number" && Number.isSafeInteger(raw)) {
+    value = BigInt(raw);
+  } else if (typeof raw === "string" && /^\d+$/.test(raw)) {
+    value = BigInt(raw);
+  } else {
+    throw new ContractResponseError(
+      `simulation returned an invalid resource fee: ${JSON.stringify(raw)}`,
+      { field: "minResourceFee" },
+    );
+  }
+
+  if (value < 0n || value > MAX_RESOURCE_FEE) {
+    throw new ContractResponseError(
+      `simulation resource fee ${value} is outside the u64 range`,
+      { field: "minResourceFee" },
+    );
+  }
+  return value;
 }
 
 /** The guard's own persistent storage keys, as they exist in ledger state. */

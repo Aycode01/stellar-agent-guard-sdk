@@ -25,6 +25,7 @@
  * evidence: the block happens before broadcast, which is what makes it free.
  */
 import { Keypair, rpc } from "@stellar/stellar-sdk";
+import { SimulationError, type GuardError } from "./errors.ts";
 import { enforceCall } from "./invoke.ts";
 import { GuardBlockedError, explainReason } from "./reasons.ts";
 import type { ContractCall } from "./tx.ts";
@@ -36,11 +37,14 @@ import type { ContractCall } from "./tx.ts";
  * when the guard never ruled would be a false claim about the security
  * boundary, which is the one thing an operator must be able to trust.
  */
-export class PreFlightUndeterminedError extends Error {
+export class PreFlightUndeterminedError extends SimulationError {
   readonly detail: string;
 
-  constructor(detail: string) {
-    super(`stellar-agent-guard could not determine this action's status\n${detail}`);
+  constructor(detail: string, options: { cause?: unknown } = {}) {
+    super(`stellar-agent-guard could not determine this action's status\n${detail}`, {
+      stage: "preflight",
+      ...(options.cause === undefined ? {} : { cause: options.cause }),
+    });
     this.name = "PreFlightUndeterminedError";
     this.detail = detail;
   }
@@ -69,6 +73,8 @@ export type PreFlightDecision =
       allowed: false;
       kind: "undetermined";
       detail: string;
+      /** Machine-readable cause; use `instanceof` instead of matching `detail`. */
+      error?: GuardError;
     };
 
 export interface PreFlightConfig {
@@ -106,7 +112,12 @@ export class PreFlightInterceptor {
     });
 
     if (outcome.kind === "error") {
-      return { allowed: false, kind: "undetermined", detail: outcome.detail };
+      return {
+        allowed: false,
+        kind: "undetermined",
+        detail: outcome.detail,
+        error: new SimulationError(outcome.detail, { stage: "preflight" }),
+      };
     }
     if (outcome.kind === "blocked") {
       return {
@@ -150,7 +161,7 @@ export class PreFlightInterceptor {
         detail: decision.detail,
       });
     }
-    throw new PreFlightUndeterminedError(decision.detail);
+    throw new PreFlightUndeterminedError(decision.detail, { cause: decision.error });
   }
 }
 

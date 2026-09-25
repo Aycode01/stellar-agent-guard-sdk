@@ -306,6 +306,35 @@ describe("invoke dry run", () => {
 });
 
 describe("invoke typed failures", () => {
+  it("returns ContractResponseError for malformed required-authorization payloads", async () => {
+    const responses = [
+      { ...simulationSuccess(), result: { auth: null } },
+      { ...simulationSuccess(), result: { auth: [null] } },
+      { ...simulationSuccess(), result: { auth: [{}] } },
+    ];
+
+    for (const response of responses) {
+      const source = Keypair.random();
+      const agent = Keypair.random();
+      const mock = mockServer([response]);
+      const result = await invoke(dryParams(mock.server, source, agent));
+
+      assert.equal(result.verdict, "undetermined");
+      assert.ok(result.error instanceof ContractResponseError);
+      assert.match(result.error.field, /^result\.auth/);
+      assert.deepEqual(
+        result.steps.map((step) => [step.name, step.ok]),
+        [
+          ["probe", true],
+          ["sign", false],
+          ["verdict", false],
+          ["fees", true],
+        ],
+      );
+      assert.equal(mock.sendCalls, 0);
+    }
+  });
+
   it("returns SigningError when required authorization has no matching key", async () => {
     const source = Keypair.random();
     const agent = Keypair.random();

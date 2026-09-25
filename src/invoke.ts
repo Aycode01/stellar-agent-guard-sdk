@@ -86,6 +86,10 @@ export type InvokeOutcome =
       detail: string;
       /** Diagnostic events emitted by the contract during enforced simulation. */
       diagnosticEvents: unknown[];
+      /** Present only when policy/account state changed and blocked after inclusion. */
+      transactionHash?: string;
+      /** True only for a post-broadcast refusal; absent for free preflight blocks. */
+      charged?: boolean;
     }
   | {
       kind: "error";
@@ -410,6 +414,17 @@ async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
     // construction (sequence, fee, footprint) or a contract trap — never a
     // guardrail doing its job.
     const detail = `tx ${submission.hash} ${describeSubmissionFailure(submission.failure)}`;
+    const reason = reasonFromDiagnosticEvents(submission.failure.diagnosticEvents);
+    if (reason !== null) {
+      return {
+        kind: "blocked",
+        reason,
+        detail,
+        diagnosticEvents: submission.failure.diagnosticEvents,
+        transactionHash: submission.hash,
+        charged: true,
+      };
+    }
     return {
       kind: "error",
       detail,

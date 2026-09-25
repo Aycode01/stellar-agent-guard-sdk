@@ -8,7 +8,16 @@
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { Account, Address, Keypair, SorobanDataBuilder, rpc, xdr } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Address,
+  Keypair,
+  SorobanDataBuilder,
+  rpc,
+  scValToNative,
+  xdr,
+  type Transaction,
+} from "@stellar/stellar-sdk";
 import {
   BroadcastError,
   ContractResponseError,
@@ -65,6 +74,7 @@ interface MockServer {
   simulateCalls: number;
   sendCalls: number;
   pollCalls: number;
+  simulatedTransactions: Transaction[];
 }
 
 function mockServer(
@@ -77,6 +87,7 @@ function mockServer(
   },
 ): MockServer {
   const counts = { simulateCalls: 0, sendCalls: 0, pollCalls: 0 };
+  const simulatedTransactions: Transaction[] = [];
   const server = {
     async getAccount(publicKey: string): Promise<Account> {
       return new Account(publicKey, "17");
@@ -84,8 +95,9 @@ function mockServer(
     async getLatestLedger(): Promise<{ sequence: number }> {
       return { sequence: 100 };
     },
-    async simulateTransaction(): Promise<object> {
+    async simulateTransaction(transaction: Transaction): Promise<object> {
       counts.simulateCalls += 1;
+      simulatedTransactions.push(transaction);
       const reply = replies.shift();
       if (reply === undefined) throw new Error(`unexpected simulation #${counts.simulateCalls}`);
       if (reply instanceof Error) throw reply;
@@ -111,6 +123,7 @@ function mockServer(
     get pollCalls() {
       return counts.pollCalls;
     },
+    simulatedTransactions,
   };
 }
 
@@ -186,6 +199,42 @@ describe("invoke dry run", () => {
     assert.equal(mock.pollCalls, 0);
     assert.ok(!("submission" in result));
     assert.ok(!("txHash" in result));
+  });
+
+  it("signs and attaches real guard authorization in the enforced dry-run simulation", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const guardAuth = requiredAddressAuth(GUARD);
+    const mock = mockServer([
+      simulationSuccess("777", [guardAuth]),
+      simulationSuccess("777"),
+    ]);
+
+    const result = await invoke(dryParams(mock.server, source, agent));
+
+    assert.equal(result.admissible, true);
+    assert.equal(mock.simulateCalls, 2);
+    assert.equal(mock.sendCalls, 0);
+    assert.equal(mock.pollCalls, 0);
+
+    const enforcedTransaction = mock.simulatedTransactions[1]!;
+    const envelope = enforcedTransaction.toEnvelope() as unknown as {
+      v1: {
+        tx: {
+          operations: Array<{
+            body: { invokeHostFunctionOp?: { auth: xdr.SorobanAuthorizationEntry[] } };
+          }>;
+        };
+      };
+    };
+    const hostOperation = envelope.v1.tx.operations[0]!.body.invokeHostFunctionOp!;
+    const signedEntry = hostOperation.auth[0]!;
+    assert.equal(signedEntry.credentials.type, "sorobanCredentialsAddress");
+    const credentials = signedEntry.credentials.address!;
+    assert.equal(Address.fromScAddress(credentials.address).toString(), GUARD);
+    const signature = scValToNative(credentials.signature);
+    assert.ok(signature instanceof Uint8Array);
+    assert.equal(signature.length, 64);
   });
 
   it("returns a blocked verdict, reason, diagnostics, and zero charged fees", async () => {

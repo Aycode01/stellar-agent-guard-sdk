@@ -84,8 +84,9 @@ export function addressToScVal(strkey: string): xdr.ScVal {
  *
  * `payload` is verified exactly as supplied and is never re-hashed. The guard
  * verifies the host-provided 32-byte `HashIdPreimage` digest, so an integration
- * checking an auth entry must pass that same digest. Malformed keys, non-64-byte
- * signatures, and verification failures all return `false`; this diagnostic
+ * checking an auth entry must pass that same digest. Malformed keys, payloads that
+ * are not 32 bytes, non-64-byte signatures, and verification failures all return
+ * `false`; this diagnostic
  * helper does not throw for attacker-controlled input.
  */
 export function verifyAgentSignature(
@@ -96,7 +97,7 @@ export function verifyAgentSignature(
   try {
     const rawPublicKey =
       typeof publicKey === "string" ? StrKey.decodeEd25519PublicKey(publicKey) : publicKey;
-    if (rawPublicKey.length !== 32 || signature.length !== 64) return false;
+    if (rawPublicKey.length !== 32 || payload.length !== 32 || signature.length !== 64) return false;
     return verifyEd25519(payload, signature, rawPublicKey);
   } catch {
     return false;

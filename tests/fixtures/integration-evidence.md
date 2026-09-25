@@ -193,12 +193,12 @@ Successful on Node `v24.21.0`:
 ```text
 npm run typecheck   # pass
 npm run lint        # pass
-npm test            # 104 tests, 104 pass, 0 fail
+npm test            # 112 tests, 112 pass, 0 fail
 npm run build       # pass; public declarations include every new export
 npm pack --dry-run  # pass; 51 package files, no private fixture or env file
 ```
 
-The 104-test suite includes, without network or secrets:
+The 112-test suite includes, without network or secrets:
 
 - policy encode/decode round trips for default, populated Vec, `fns: null`,
   `fns: []`, populated `fns`, i128 bounds, u64 max, and string-number normalization;
@@ -206,9 +206,14 @@ The 104-test suite includes, without network or secrets:
   non-address values, and missing policy;
 - admissible and blocked dry runs with exact five-stage traces, diagnostics, fees, and
   zero `sendTransaction` / `getTransaction` calls at the mocked RPC boundary;
-- typed probe, signing, and broadcast failures with `instanceof` and cause assertions;
-- valid, wrong-key, mutated-payload, truncated, empty, oversized, malformed-key, and
-  SEP-53-mismatch signature checks; and
+- a guard-auth-bearing enforced simulation whose second transaction contains the real
+  64-byte agent signature at the guard authorization entry;
+- missing, negative, malformed, unsafe-number, and out-of-range fee rejection in dry run,
+  preflight, and cost pre-check paths (all fail closed rather than pricing at zero);
+- typed probe, signing, malformed-auth, post-inclusion guard-block, and broadcast failures
+  with `instanceof`, charged/hash, diagnostic, and cause assertions; and
+- valid, wrong-key, mutated-payload, non-32-byte-payload, truncated, empty, oversized,
+  malformed-key, and SEP-53-mismatch signature checks; plus
 - public-root imports proving the complete `GuardError` subclass hierarchy.
 
 ### Live enforcement-suite limitation — not claimed as passing

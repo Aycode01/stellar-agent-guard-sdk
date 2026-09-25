@@ -196,14 +196,17 @@ if (debug.kind === "dry_run") {
 
 A blocked or undetermined dry run reports an explicit all-zero **charged** fee breakdown;
 an admissible dry run reports the simulation's resource fee plus the SDK's 100-stroop
-inclusion floor. `steps[].ok` describes whether a stage completed, not whether policy
-approved the call—the separate `verdict` field is the policy answer.
+inclusion floor. Missing, negative, malformed, unsafe-number, or out-of-u64-range fee
+payloads are `ContractResponseError` failures and remain undetermined—never free.
+`steps[].ok` describes whether a stage completed, not whether policy approved the call;
+the separate `verdict` field is the policy answer.
 
 ### Troubleshooting agent authentication
 
 `verifyAgentSignature` lets an agent runtime check that a signature belongs to the key it
-believes is registered before entering an agent loop. It is verify-only: the SDK never
-accepts, stores, or derives a private key.
+believes is registered before entering an agent loop. The helper is verify-only: it never
+accepts, signs with, stores, or derives a private key. Other SDK APIs continue to accept
+caller-created `Keypair` objects for transaction/authorization signing as before.
 
 ```ts
 import { verifyAgentSignature } from "stellar-agent-guard-sdk";
@@ -251,6 +254,11 @@ if (outcome.kind === "error") {
   }
 }
 ```
+
+If ledger state changes after enforced simulation and the included transaction is then
+refused by the guard, `invoke()` still returns `kind: "blocked"` with the contract reason
+and diagnostics. That charged outcome additionally carries `transactionHash` and
+`charged: true`; it is not flattened into a technical `BroadcastError`.
 
 `GuardBlockedError` keeps its published name, message, fields, and `instanceof` behavior
 and now extends `GuardError`; `PreFlightUndeterminedError` extends `SimulationError`.

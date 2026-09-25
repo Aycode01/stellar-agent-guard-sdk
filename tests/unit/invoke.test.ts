@@ -11,22 +11,31 @@ import { describe, it } from "node:test";
 import { Account, Address, Keypair, SorobanDataBuilder, rpc, xdr } from "@stellar/stellar-sdk";
 import {
   BroadcastError,
+  ContractResponseError,
   SigningError,
   SimulationError,
 } from "../../src/errors.ts";
 import { invoke, type InvokeParams } from "../../src/invoke.ts";
+import { CostPreChecker } from "../../src/cost.ts";
+import { PreFlightInterceptor } from "../../src/preflight.ts";
 
 const NETWORK = "Test SDF Network ; September 2015";
 const TOKEN = "CDCYDGBGS5AZ5BZS6XY2SK2PHJHSOEGTN3N4INCK34KF6GU2BGC7Z6MB";
 const GUARD = "CAPADGEK457RHKN4RYVUMDJTFHDSG7R5HREQONKLYK7MFKC5WFENPP44";
 
-function simulationSuccess(resourceFee = "777", auth: xdr.SorobanAuthorizationEntry[] = []): object {
+function simulationSuccess(resourceFee: unknown = "777", auth: xdr.SorobanAuthorizationEntry[] = []): object {
   return {
     transactionData: new SorobanDataBuilder().setResources(10, 20, 30).build(),
     minResourceFee: resourceFee,
     result: { auth },
     events: [],
   };
+}
+
+function simulationWithoutResourceFee(): object {
+  const response = simulationSuccess() as { minResourceFee?: unknown };
+  delete response.minResourceFee;
+  return response;
 }
 
 function blockedSimulation(): object {
@@ -238,6 +247,61 @@ describe("invoke dry run", () => {
     );
     assert.equal(result.steps[0]?.ok, false);
     assert.equal(mock.sendCalls, 0);
+  });
+
+  it("fails closed when the enforced simulation fee is missing, negative, or malformed", async () => {
+    const invalidFees: Array<() => object> = [
+      () => simulationWithoutResourceFee(),
+      () => simulationSuccess("-1"),
+      () => simulationSuccess("not-a-fee"),
+      () => simulationSuccess(2n ** 64n),
+    ];
+
+    for (const response of invalidFees) {
+      const source = Keypair.random();
+      const agent = Keypair.random();
+      const mock = mockServer([response(), response()]);
+      const result = await invoke(dryParams(mock.server, source, agent));
+
+      assert.equal(result.verdict, "undetermined");
+      assert.ok(result.error instanceof ContractResponseError);
+      assert.equal(result.error.field, "minResourceFee");
+      assert.equal(result.fees.totalFeeStroops, 0n);
+      assert.equal(result.steps.at(-1)?.ok, false);
+      assert.equal(mock.sendCalls, 0);
+    }
+  });
+
+  it("keeps preflight and cost checks fail-closed on invalid simulation fees", async () => {
+    const invalidFees: Array<() => object> = [
+      () => simulationWithoutResourceFee(),
+      () => simulationSuccess("-1"),
+      () => simulationSuccess("not-a-fee"),
+    ];
+
+    for (const response of invalidFees) {
+      const source = Keypair.random();
+      const agent = Keypair.random();
+      const mock = mockServer([response(), response(), response(), response()]);
+      const config = {
+        server: mock.server,
+        networkPassphrase: NETWORK,
+        guard: GUARD,
+        agent,
+        source,
+      };
+      const interceptor = new PreFlightInterceptor(config);
+      const call = baseParams(mock.server, source, agent).call;
+
+      const decision = await interceptor.check(call);
+      assert.equal(decision.kind, "undetermined");
+      assert.ok(decision.error instanceof ContractResponseError);
+
+      const cost = await new CostPreChecker({ interceptor }).check(call);
+      assert.equal(cost.kind, "undetermined");
+      assert.equal(cost.totalFeeStroops, 0n);
+      assert.equal(mock.sendCalls, 0);
+    }
   });
 });
 

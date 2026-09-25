@@ -25,10 +25,10 @@
  * evidence: the block happens before broadcast, which is what makes it free.
  */
 import { Keypair, rpc } from "@stellar/stellar-sdk";
-import { SimulationError, type GuardError } from "./errors.ts";
+import { GuardError, SimulationError } from "./errors.ts";
 import { enforceCall } from "./invoke.ts";
 import { GuardBlockedError, explainReason } from "./reasons.ts";
-import type { ContractCall } from "./tx.ts";
+import { parseSimulationResourceFee, type ContractCall } from "./tx.ts";
 
 /**
  * Thrown when enforcement could not reach a decision.
@@ -136,10 +136,31 @@ export class PreFlightInterceptor {
     const footprintKeys =
       (data?.getReadOnly?.().length ?? 0) + (data?.getReadWrite?.().length ?? 0);
 
+    let estimatedResourceFee: bigint;
+    try {
+      estimatedResourceFee = parseSimulationResourceFee(outcome.simulation.minResourceFee);
+    } catch (cause) {
+      const detail = `enforced simulation returned an invalid resource fee: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`;
+      return {
+        allowed: false,
+        kind: "undetermined",
+        detail,
+        error:
+          cause instanceof GuardError
+            ? cause
+            : new SimulationError("enforced simulation returned an invalid resource fee", {
+                stage: "preflight",
+                cause,
+              }),
+      };
+    }
+
     return {
       allowed: true,
       kind: "admissible",
-      estimatedResourceFee: BigInt(outcome.simulation.minResourceFee ?? 0),
+      estimatedResourceFee,
       footprintKeys,
     };
   }

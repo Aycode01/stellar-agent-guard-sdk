@@ -153,9 +153,21 @@ export function decodePolicy(scVal: xdr.ScVal): PolicyConfig {
   try {
     const fields = symbolMap(policyMap(scVal), "policy", POLICY_FIELDS);
     return {
-      per_tx_cap: policyInteger(fields.get("per_tx_cap")!, "per_tx_cap", I128_MIN, I128_MAX),
-      window_secs: policyInteger(fields.get("window_secs")!, "window_secs", 0n, U64_MAX),
-      window_cap: policyInteger(fields.get("window_cap")!, "window_cap", I128_MIN, I128_MAX),
+      per_tx_cap: policyInteger(
+        fields.get("per_tx_cap")!,
+        "per_tx_cap",
+        "i128",
+        I128_MIN,
+        I128_MAX,
+      ),
+      window_secs: policyInteger(fields.get("window_secs")!, "window_secs", "u64", 0n, U64_MAX),
+      window_cap: policyInteger(
+        fields.get("window_cap")!,
+        "window_cap",
+        "i128",
+        I128_MIN,
+        I128_MAX,
+      ),
       assets: addressVector(fields.get("assets")!, "assets"),
       protocols: protocolRules(fields.get("protocols")!),
       recipients: addressVector(fields.get("recipients")!, "recipients"),
@@ -163,12 +175,13 @@ export function decodePolicy(scVal: xdr.ScVal): PolicyConfig {
         fields.get("allow_any_recipient")!,
         "allow_any_recipient",
       ),
-      active_from: policyInteger(fields.get("active_from")!, "active_from", 0n, U64_MAX),
-      active_until: policyInteger(fields.get("active_until")!, "active_until", 0n, U64_MAX),
+      active_from: policyInteger(fields.get("active_from")!, "active_from", "u64", 0n, U64_MAX),
+      active_until: policyInteger(fields.get("active_until")!, "active_until", "u64", 0n, U64_MAX),
       paused: policyBoolean(fields.get("paused")!, "paused"),
       dms_grace_secs: policyInteger(
         fields.get("dms_grace_secs")!,
         "dms_grace_secs",
+        "u64",
         0n,
         U64_MAX,
       ),
@@ -235,11 +248,16 @@ function symbolMap(
 function policyInteger(
   scVal: xdr.ScVal,
   path: string,
+  wireType: "u64" | "i128",
   min: bigint,
   max: bigint,
 ): bigint {
-  if (scVal.type !== "scvU64" && scVal.type !== "scvI128" && scVal.type !== "scvString") {
-    throw policyDecodeFailure(path, `expected u64, i128, or a decimal string, got ${scVal.type}`);
+  const expectedType = wireType === "u64" ? "scvU64" : "scvI128";
+  if (scVal.type !== expectedType && scVal.type !== "scvString") {
+    throw policyDecodeFailure(
+      path,
+      `expected ${wireType} (${expectedType}), or a decimal string, got ${scVal.type}`,
+    );
   }
 
   const native = scValToNative(scVal);

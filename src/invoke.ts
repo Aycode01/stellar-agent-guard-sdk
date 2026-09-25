@@ -19,6 +19,7 @@ import { Account, Address, Keypair, Operation, rpc, scValToNative, xdr } from "@
 import { feeBreakdown, type FeeBreakdown } from "./cost.ts";
 import {
   BroadcastError,
+  ContractResponseError,
   GuardError,
   SigningError,
   SimulationError,
@@ -207,6 +208,40 @@ function diagnosticEventsOf(response: unknown): unknown[] {
     if (Array.isArray(value)) return value;
   }
   return [];
+}
+
+function requiredAuthorizationEntries(
+  response: unknown,
+): xdr.SorobanAuthorizationEntry[] {
+  const result = (response as { result?: unknown }).result;
+  if (result !== undefined && (result === null || typeof result !== "object")) {
+    throw new ContractResponseError("simulation result is not an object", {
+      field: "result",
+    });
+  }
+  const auth = (result as { auth?: unknown } | undefined)?.auth;
+  if (auth === undefined) return [];
+  if (!Array.isArray(auth)) {
+    throw new ContractResponseError("simulation result.auth is not an array", {
+      field: "result.auth",
+    });
+  }
+  return auth.map((entry, index) => {
+    const credentials = (entry as { credentials?: unknown } | null)?.credentials;
+    if (
+      entry === null ||
+      typeof entry !== "object" ||
+      credentials === null ||
+      typeof credentials !== "object" ||
+      typeof (credentials as { type?: unknown }).type !== "string"
+    ) {
+      throw new ContractResponseError(
+        `simulation result.auth[${index}] has no credential payload`,
+        { field: `result.auth[${index}].credentials` },
+      );
+    }
+    return entry as xdr.SorobanAuthorizationEntry;
+  });
 }
 
 type InvokeStepObserver = (step: InvokePipelineStep) => void;
@@ -522,10 +557,28 @@ async function enforceCallWithTrace(
   }
   recordStep(onStep, "probe", probeStartedAt, true);
   const success = first as rpc.Api.SimulateTransactionSuccessResponse;
-  const requiredAuth: xdr.SorobanAuthorizationEntry[] = success.result?.auth ?? [];
 
   // ── Step 2: sign every authorization the call requires ────────────────
   const signStartedAt = Date.now();
+  let requiredAuth: xdr.SorobanAuthorizationEntry[];
+  try {
+    requiredAuth = requiredAuthorizationEntries(success);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    recordStep(onStep, "sign", signStartedAt, false);
+    return {
+      kind: "error",
+      detail,
+      error:
+        cause instanceof ContractResponseError
+          ? cause
+          : new SimulationError("could not read required authorization entries", {
+              stage: "probe",
+              cause,
+            }),
+      diagnosticEvents: [],
+    };
+  }
   const signedAuth: xdr.SorobanAuthorizationEntry[] = [];
   for (const entry of requiredAuth) {
     const creds = entry.credentials;

@@ -120,6 +120,16 @@ describe("verifyAgentSignature", () => {
     assert.equal(verifyAgentSignature(agent.publicKey(), mutated, signature), false);
   });
 
+  it("rejects payloads that are not the 32-byte host auth digest", () => {
+    for (const size of [0, 1, 31, 33, 64]) {
+      const signature = agent.sign(Buffer.alloc(size, 9));
+      assert.equal(
+        verifyAgentSignature(agent.publicKey(), Buffer.alloc(size, 9), signature),
+        false,
+      );
+    }
+  });
+
   it("returns false for empty, truncated, and oversized signatures", () => {
     assert.equal(verifyAgentSignature(agent.publicKey(), payload, new Uint8Array()), false);
     assert.equal(verifyAgentSignature(agent.publicKey(), payload, signature.subarray(0, 63)), false);

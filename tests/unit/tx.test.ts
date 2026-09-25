@@ -12,9 +12,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Keypair, SorobanDataBuilder } from "@stellar/stellar-sdk";
+import { ContractResponseError } from "../../src/errors.ts";
 import {
   describeSimulationResources,
   isStaleLedgerResourceFailure,
+  parseSimulationResourceFee,
   verifyAgentSignature,
 } from "../../src/tx.ts";
 
@@ -53,6 +55,29 @@ const guardBlockFailure = {
     },
   ],
 };
+
+describe("parseSimulationResourceFee", () => {
+  it("accepts exact non-negative u64 values across SDK representations", () => {
+    assert.equal(parseSimulationResourceFee("0"), 0n);
+    assert.equal(parseSimulationResourceFee("42"), 42n);
+    assert.equal(parseSimulationResourceFee(42), 42n);
+    assert.equal(parseSimulationResourceFee(42n), 42n);
+    assert.equal(parseSimulationResourceFee((2n ** 64n - 1n).toString()), 2n ** 64n - 1n);
+  });
+
+  it("rejects missing, malformed, negative, unsafe, and out-of-range fees", () => {
+    for (const value of [undefined, null, "", "not-a-fee", "1.5", Number.MAX_SAFE_INTEGER + 1, -1, -1n, "-1", 2n ** 64n]) {
+      assert.throws(
+        () => parseSimulationResourceFee(value),
+        (error: unknown) => {
+          assert.ok(error instanceof ContractResponseError);
+          assert.equal(error.field, "minResourceFee");
+          return true;
+        },
+      );
+    }
+  });
+});
 
 describe("isStaleLedgerResourceFailure", () => {
   it("recognises the real scecExceededLimit rejection", () => {

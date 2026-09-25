@@ -231,8 +231,8 @@ function recordStep(
  * declared byte-write budget can be short and core rejects the transaction
  * *after* inclusion with `scecExceededLimit`. See `isStaleLedgerResourceFailure`
  * for why retrying is safe. Every other failure — including a guard block — is
- * returned untouched, and the retry is reported in `retried` so it is never
- * silent.
+ * returned untouched, and a retryable failure is marked with `retryable` so it
+ * is never silent.
  */
 export function invoke(params: InvokeParams & { dryRun: true }): Promise<InvokeDryRunResult>;
 export function invoke(
@@ -362,16 +362,30 @@ async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
   if (enforced.kind !== "admissible") return enforced;
 
   // ── Step 4: assemble real resources, sign the envelope, broadcast ─────
-  const assembled = assembleFromSimulation({
-    simulation: enforced.simulation,
-    // A fresh `Account` per build: `TransactionBuilder` advances the sequence of
-    // the instance it is handed, so sharing one across builds silently produces
-    // `tx_bad_seq`.
-    source: new Account(params.source.publicKey(), enforced.nextSeq),
-    operation: enforced.operation,
-    networkPassphrase: params.networkPassphrase,
-    guard: params.guardAuth?.guard ?? null,
-  });
+  let assembled: ReturnType<typeof assembleFromSimulation>;
+  try {
+    assembled = assembleFromSimulation({
+      simulation: enforced.simulation,
+      // A fresh `Account` per build: `TransactionBuilder` advances the sequence of
+      // the instance it is handed, so sharing one across builds silently produces
+      // `tx_bad_seq`.
+      source: new Account(params.source.publicKey(), enforced.nextSeq),
+      operation: enforced.operation,
+      networkPassphrase: params.networkPassphrase,
+      guard: params.guardAuth?.guard ?? null,
+    });
+  } catch (cause) {
+    const detail = `transaction assembly failed: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return {
+      kind: "error",
+      detail,
+      error: new SimulationError("could not assemble transaction from enforced simulation", {
+        stage: "simulate",
+        cause,
+      }),
+      diagnosticEvents: [],
+    };
+  }
 
   let submission: SubmissionResult;
   try {
@@ -531,7 +545,21 @@ export async function enforceCall(
     // Works for both account (G…) and contract (C…) authorizers; the guard's
     // address is a contract, which is exactly why the agent key — not the
     // transaction source — has to produce this signature.
-    const address = Address.fromScAddress(addressCredentials.address).toString();
+    let address: string;
+    try {
+      address = Address.fromScAddress(addressCredentials.address).toString();
+    } catch (cause) {
+      const detail = `required authorization has an invalid address payload: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`;
+      recordStep(onStep, "sign", signStartedAt, false);
+      return {
+        kind: "error",
+        detail,
+        error: new SigningError(detail, { cause }),
+        diagnosticEvents: [],
+      };
+    }
 
     if (params.guardAuth && address === params.guardAuth.guard) {
       // The smart account authorizes: sign with the registered agent key over
@@ -607,19 +635,36 @@ export async function enforceCall(
   recordStep(onStep, "sign", signStartedAt, true);
 
   // ── Step 3: enforced simulation — this is where policy is applied ─────
-  const signedOperation = Operation.invokeContractFunction({
-    contract: call.contract,
-    function: call.fn,
-    args: call.args,
-    auth: signedAuth,
-  });
-  const enforcingTx = buildInitialEnvelope({
-    source: freshAccount(),
-    operation: signedOperation,
-    networkPassphrase,
-    guard: params.guardAuth?.guard ?? null,
-  });
   const simulateStartedAt = Date.now();
+  let signedOperation: xdr.Operation;
+  let enforcingTx: ReturnType<typeof buildInitialEnvelope>;
+  try {
+    signedOperation = Operation.invokeContractFunction({
+      contract: call.contract,
+      function: call.fn,
+      args: call.args,
+      auth: signedAuth,
+    });
+    enforcingTx = buildInitialEnvelope({
+      source: freshAccount(),
+      operation: signedOperation,
+      networkPassphrase,
+      guard: params.guardAuth?.guard ?? null,
+    });
+  } catch (cause) {
+    recordStep(onStep, "simulate", simulateStartedAt, false);
+    return {
+      kind: "error",
+      detail: `could not build enforced simulation: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+      error: new SimulationError("could not build enforced simulation", {
+        stage: "simulate",
+        cause,
+      }),
+      diagnosticEvents: [],
+    };
+  }
   let enforced: rpc.Api.SimulateTransactionResponse;
   try {
     enforced = await server.simulateTransaction(enforcingTx);

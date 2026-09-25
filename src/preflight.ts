@@ -116,7 +116,7 @@ export class PreFlightInterceptor {
         allowed: false,
         kind: "undetermined",
         detail: outcome.detail,
-        error: new SimulationError(outcome.detail, { stage: "preflight" }),
+        error: outcome.error,
       };
     }
     if (outcome.kind === "blocked") {

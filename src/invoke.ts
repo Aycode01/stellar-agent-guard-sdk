@@ -261,7 +261,7 @@ export async function invoke(params: InvokeParams): Promise<InvokeOutcome> {
 
 async function invokeDryRun(params: InvokeParams): Promise<InvokeDryRunResult> {
   const steps: InvokePipelineStep[] = [];
-  const enforced = await enforceCall(params, (step) => steps.push(step));
+  const enforced = await enforceCallWithTrace(params, (step) => steps.push(step));
   const verdictStartedAt = Date.now();
 
   let verdict: InvokeDryRunVerdict =
@@ -426,7 +426,11 @@ async function invokePipeline(params: InvokeParams): Promise<InvokeOutcome> {
  *
  * Nothing here mutates the ledger, which is what makes a refusal free.
  */
-export async function enforceCall(
+export function enforceCall(params: InvokeParams): Promise<EnforcementOutcome> {
+  return enforceCallWithTrace(params);
+}
+
+async function enforceCallWithTrace(
   params: InvokeParams,
   onStep?: InvokeStepObserver,
 ): Promise<EnforcementOutcome> {

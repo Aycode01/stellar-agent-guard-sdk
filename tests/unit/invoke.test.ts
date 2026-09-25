@@ -38,23 +38,25 @@ function simulationWithoutResourceFee(): object {
   return response;
 }
 
+function blockedDiagnosticEvent(): object {
+  return {
+    event: {
+      body: {
+        v0: {
+          topics: ["event_auth_checked", "blocked", "per_tx_cap_exceeded"].map((topic) =>
+            xdr.ScVal.scvSymbol(topic),
+          ),
+          data: xdr.ScVal.scvVoid(),
+        },
+      },
+    },
+  };
+}
+
 function blockedSimulation(): object {
   return {
     error: "HostError: Error(Auth, InvalidAction)",
-    events: [
-      {
-        event: {
-          body: {
-            v0: {
-              topics: ["event_auth_checked", "blocked", "per_tx_cap_exceeded"].map((topic) =>
-                xdr.ScVal.scvSymbol(topic),
-              ),
-              data: xdr.ScVal.scvVoid(),
-            },
-          },
-        },
-      },
-    ],
+    events: [blockedDiagnosticEvent()],
   };
 }
 
@@ -69,6 +71,9 @@ function mockServer(
   replies: Array<object | Error>,
   send: () => unknown = () => {
     throw new Error("dry-run must not call sendTransaction");
+  },
+  poll: () => unknown = () => {
+    throw new Error("dry-run must not call getTransaction");
   },
 ): MockServer {
   const counts = { simulateCalls: 0, sendCalls: 0, pollCalls: 0 };
@@ -90,9 +95,9 @@ function mockServer(
       counts.sendCalls += 1;
       return send();
     },
-    async getTransaction(): Promise<never> {
+    async getTransaction(): Promise<unknown> {
       counts.pollCalls += 1;
-      throw new Error("dry-run must not call getTransaction");
+      return poll();
     },
   } as unknown as rpc.Server;
   return {
@@ -365,5 +370,32 @@ describe("invoke typed failures", () => {
     assert.equal(mock.simulateCalls, 2);
     assert.equal(mock.sendCalls, 1);
     assert.equal(mock.pollCalls, 0);
+  });
+
+  it("preserves a post-inclusion guard block as a charged blocked outcome", async () => {
+    const source = Keypair.random();
+    const agent = Keypair.random();
+    const hash = "b".repeat(64);
+    const mock = mockServer(
+      [simulationSuccess("555"), simulationSuccess("555")],
+      () => ({ status: "PENDING", hash }),
+      () => ({
+        status: rpc.Api.GetTransactionStatus.FAILED,
+        ledger: 101,
+        resultXdr: null,
+        diagnosticEventsXdr: [blockedDiagnosticEvent()],
+      }),
+    );
+
+    const result = await invoke(baseParams(mock.server, source, agent));
+
+    assert.equal(result.kind, "blocked");
+    assert.equal(result.reason, "per_tx_cap_exceeded");
+    assert.equal(result.transactionHash, hash);
+    assert.equal(result.charged, true);
+    assert.equal(result.diagnosticEvents.length, 1);
+    assert.equal(mock.simulateCalls, 2);
+    assert.equal(mock.sendCalls, 1);
+    assert.equal(mock.pollCalls, 1);
   });
 });
